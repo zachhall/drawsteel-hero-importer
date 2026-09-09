@@ -27,11 +27,4 @@ export type CanvasNode = CanvasTextNode | CanvasGroupNode;
 export interface CanvasData {
 	nodes: CanvasNode[];
 	edges: never[];
-	/**
-	 * Not part of the JSON Canvas spec — implementations are required to
-	 * ignore unrecognized top-level properties, so this rides along safely.
-	 * Lets the importer identify a hero/level on re-import without needing
-	 * any of Obsidian's Markdown-only frontmatter machinery.
-	 */
-	metadata: { name: string; level: number };
 }

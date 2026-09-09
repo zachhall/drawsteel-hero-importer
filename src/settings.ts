@@ -4,18 +4,13 @@ import type DrawSteelHeroImporterPlugin from "../main";
 export interface HeroImporterSettings {
 	/** Vault-relative folder to place imported hero notes in. Empty string = vault root. */
 	destinationFolder: string;
-	/**
-	 * If an existing file for this exact hero name AND level is found, replace it
-	 * instead of failing. Does not affect versioning: a same-named hero at a
-	 * *different* level always gets its own "Name - Level N" file regardless of
-	 * this setting.
-	 */
-	overwriteExisting: boolean;
+	/** Vault-relative folder outdated Notes/Canvases are moved into on re-import. */
+	archiveFolder: string;
 }
 
 export const DEFAULT_SETTINGS: HeroImporterSettings = {
 	destinationFolder: "",
-	overwriteExisting: false,
+	archiveFolder: "hero-archive",
 };
 
 export class HeroImporterSettingTab extends PluginSettingTab {
@@ -79,17 +74,20 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Overwrite existing files")
+			.setName("Archive folder")
 			.setDesc(
-				"Replace an existing Note or Canvas when re-importing the same hero at " +
-					"the same Level, instead of failing. A hero re-imported at a " +
-					'different Level is never overwritten — it\'s always saved as its own "Name - Level N" file.'
+				'Re-importing a hero always keeps "Name.md" (or .canvas) as the current file — the previous ' +
+					'version is moved here first, renamed to "Name - <timestamp>". Leave blank to use ' +
+					`"${DEFAULT_SETTINGS.archiveFolder}" in the vault root.`
 			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.overwriteExisting).onChange(async (value) => {
-					this.plugin.settings.overwriteExisting = value;
-					await this.plugin.saveSettings();
-				})
+			.addText((text) =>
+				text
+					.setPlaceholder(DEFAULT_SETTINGS.archiveFolder)
+					.setValue(this.plugin.settings.archiveFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.archiveFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
 			);
 	}
 }

@@ -43,7 +43,7 @@ class CanvasLayout {
 		z.maxY = Math.max(z.maxY, y + height + GAP);
 	}
 
-	build(name: string, level: number): CanvasData {
+	build(): CanvasData {
 		const groupNodes: CanvasNode[] = this.groups.map((z, i) => ({
 			id: `zone${i}`,
 			type: "group",
@@ -54,7 +54,7 @@ class CanvasLayout {
 			label: z.label,
 			color: z.color,
 		}));
-		return { nodes: [...groupNodes, ...this.nodes], edges: [], metadata: { name, level } };
+		return { nodes: [...groupNodes, ...this.nodes], edges: [] };
 	}
 }
 
@@ -291,5 +291,5 @@ export function buildHeroCanvas(hero: DsHero, stats: HeroStats, flat: FlattenRes
 		});
 	}
 
-	return layout.build(hero.name, stats.level);
+	return layout.build();
 }

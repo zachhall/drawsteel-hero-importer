@@ -11,6 +11,14 @@ function sanitizeFilename(name: string): string {
 	return name.replace(/[\\/:*?"<>|]/g, "").trim() || "Unnamed Hero";
 }
 
+/** e.g. "2026-09-09 14-23-05-123" — colons swapped for dashes since ":" isn't valid in a Windows filename. */
+function formatTimestampForFilename(date: Date): string {
+	const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+	const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+	const timePart = `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
+	return `${datePart} ${timePart}`;
+}
+
 /** The tiny slice of Electron's renderer API this plugin actually calls. */
 interface ElectronDialog {
 	showOpenDialog(options: {
@@ -56,8 +64,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits);
 		const content = buildHeroNote(hero, stats, flat);
 
-		const target = await this.writeHeroFile(hero.name, stats.level, "md", content);
-		if (!target) return;
+		const target = await this.writeHeroFile(hero.name, "md", content);
 
 		new Notice(`Imported ${hero.name} to ${target.path}`);
 		const leaf = this.app.workspace.getLeaf(true);
@@ -73,8 +80,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits);
 		const canvas = buildHeroCanvas(hero, stats, flat);
 
-		const target = await this.writeHeroFile(hero.name, stats.level, "canvas", JSON.stringify(canvas, null, 2));
-		if (!target) return;
+		const target = await this.writeHeroFile(hero.name, "canvas", JSON.stringify(canvas, null, 2));
 
 		new Notice(`Imported ${hero.name} to ${target.path}`);
 		const leaf = this.app.workspace.getLeaf(true);
@@ -165,70 +171,55 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	}
 
 	/**
-	 * Resolves where to save a hero, versioning by Level:
-	 * - No existing file for this hero name -> use the bare name.
-	 * - An existing file at the bare name IS this same Level -> that's the
-	 *   target (subject to the overwrite setting below).
-	 * - An existing file at the bare name is a DIFFERENT Level (or its Level
-	 *   can't be determined, e.g. a pre-existing unrelated file) -> version
-	 *   as "Name - Level N", which is itself subject to the same check
-	 *   against whatever's already at *that* path.
+	 * Writes a hero to "Name.ext" in the destination folder, always the
+	 * current import. If a file is already there, its *old* content is
+	 * copied into the archive folder as a new file, and the existing file is
+	 * then updated in place with the new content — rather than overwritten
+	 * wholesale or versioned by Level. Updating in place, instead of moving
+	 * the old file out and creating a fresh one, is deliberate: a rename
+	 * carries any `[[Name]]` links elsewhere in the vault along with it, so
+	 * moving the *old* file to the archive would leave every existing
+	 * reference to this hero pointing at the outdated snapshot instead of
+	 * the current one. There's no failure case: re-importing a hero always
+	 * succeeds and always keeps the previous version around in the archive.
 	 */
-	private async writeHeroFile(heroName: string, level: number, extension: string, content: string): Promise<TFile | undefined> {
+	private async writeHeroFile(heroName: string, extension: string, content: string): Promise<TFile> {
 		const folder = this.settings.destinationFolder ? normalizePath(this.settings.destinationFolder) : "";
 		if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
 			await this.app.vault.createFolder(folder);
 		}
 
-		const toPath = (filename: string) => normalizePath(folder ? `${folder}/${filename}.${extension}` : `${filename}.${extension}`);
-
 		const baseName = sanitizeFilename(heroName);
-		const barePath = toPath(baseName);
-		const bareExisting = this.app.vault.getAbstractFileByPath(barePath);
+		const path = normalizePath(folder ? `${folder}/${baseName}.${extension}` : `${baseName}.${extension}`);
 
-		let targetPath = barePath;
-		let existing: TFile | undefined = bareExisting instanceof TFile ? bareExisting : undefined;
-
-		if (existing) {
-			const existingLevel = await this.readExistingHeroLevel(existing);
-			if (existingLevel !== level) {
-				targetPath = toPath(`${baseName} - Level ${level}`);
-				const versionedExisting = this.app.vault.getAbstractFileByPath(targetPath);
-				existing = versionedExisting instanceof TFile ? versionedExisting : undefined;
-			}
-		}
-
-		if (existing) {
-			if (!this.settings.overwriteExisting) {
-				new Notice(
-					`A Level ${level} file for "${heroName}" already exists at "${targetPath}". ` +
-						'Import canceled — enable "Overwrite existing files" in settings if you want to replace it.'
-				);
-				return undefined;
-			}
+		const existing = this.app.vault.getAbstractFileByPath(path);
+		if (existing instanceof TFile) {
+			await this.archiveFileContent(existing, baseName);
 			await this.app.vault.modify(existing, content);
 			return existing;
 		}
 
-		return this.app.vault.create(targetPath, content);
+		return this.app.vault.create(path, content);
 	}
 
-	/** Reads back the Level a previously-imported Note/Canvas was created for, if determinable. */
-	private async readExistingHeroLevel(file: TFile): Promise<number | undefined> {
-		try {
-			const content = await this.app.vault.read(file);
-
-			if (file.extension === "canvas") {
-				const data = JSON.parse(content) as { metadata?: { level?: number } };
-				return typeof data.metadata?.level === "number" ? data.metadata.level : undefined;
-			}
-
-			const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
-			const levelLine = frontmatter?.[1].match(/^level:\s*(\d+)\s*$/m);
-			return levelLine ? Number(levelLine[1]) : undefined;
-		} catch {
-			return undefined;
+	/** Copies a hero's previous Note/Canvas content into the archive folder, timestamped, before it's replaced in place. */
+	private async archiveFileContent(file: TFile, baseName: string): Promise<void> {
+		const archiveFolder = normalizePath(this.settings.archiveFolder || DEFAULT_SETTINGS.archiveFolder);
+		if (!this.app.vault.getAbstractFileByPath(archiveFolder)) {
+			await this.app.vault.createFolder(archiveFolder);
 		}
+
+		const stem = `${baseName} - ${formatTimestampForFilename(new Date())}`;
+		let archivePath = normalizePath(`${archiveFolder}/${stem}.${file.extension}`);
+		// Millisecond precision still isn't a guarantee (system clock resolution,
+		// two rapid re-imports landing in the same tick) — fall back to a counter
+		// suffix rather than silently clobbering a still-recent archived version.
+		for (let n = 2; this.app.vault.getAbstractFileByPath(archivePath); n++) {
+			archivePath = normalizePath(`${archiveFolder}/${stem} (${n}).${file.extension}`);
+		}
+
+		const oldContent = await this.app.vault.read(file);
+		await this.app.vault.create(archivePath, oldContent);
 	}
 
 	async loadSettings() {
