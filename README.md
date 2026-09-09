@@ -1,46 +1,53 @@
 # Draw Steel Hero Importer
 
 Obsidian plugin that imports a [ForgeSteel](https://forgesteel.net) `.ds-hero`
-character export and creates a Note formatted with
+character export into a single Note formatted with
 [Draw Steel Elements](https://github.com/SteelCompendium/draw-steel-elements)
-codeblocks (characteristics, stats, skills, features/abilities).
+codeblocks.
 
-Requires the **Draw Steel Elements** plugin to be installed and enabled for
-the generated Note to render (it only formats correctly in Reading view —
-Draw Steel Elements doesn't support Live Preview yet).
+## Prerequisites
+
+- **Obsidian ≥ 1.0.2**
+- **[Draw Steel Elements](https://github.com/SteelCompendium/draw-steel-elements)** — required. The generated Note only renders correctly with this plugin installed and enabled, and only in Reading view (Draw Steel Elements doesn't support Live Preview).
+- **[ForgeSteel](https://forgesteel.net)** — where `.ds-hero` files come from. Not a dependency to install; unaffiliated with this plugin.
+- Optional: **[Power Roll Detector](https://github.com/zachhall/power-roll-detector)** — makes the Note's `Power Roll + N` values clickable dice rollers.
+
+## Features
+
+- Imports a `.ds-hero` file into one Note (`Name.md`) with Characteristics, Vitals (stamina bar), Resources, Statistics, Skills, Actions, Details, and a Background Info section.
+- Only the hero's *selected* choices are imported (ancestry traits, culture/career features, chosen class abilities and domain features, the active kit's granted ability, the complication) — unselected/available options are not included.
+- Abilities are grouped under Actions by action type (Main Action, Maneuver, Move Action, Triggered Action). Abilities granted by a Kit, Domain, or Complication are merged into the same groups.
+- Ability Power Rolls and tier damage are resolved to the hero's actual characteristic and potency values (e.g. `Power Roll + 2`, `5 + 2 psychic damage`), not left as characteristic names — compatible with Power Roll Detector.
+- A collapsible Background box links Culture, Career, subclass/Order, Domain, and Kit to matching notes in a `DS Compendium` vault folder, where one exists.
+- Re-importing a hero keeps `Name.md` as the current Note and archives the previous version into a timestamped file in an archive folder.
+- Ships a `styles.css` with additive visual styling for `ds-characteristics`, `ds-values-row`, `ds-counter`, and `ds-skills`.
+
+## Installation
+
+### Recommended: BRAT
+
+1. Install and enable the **BRAT** community plugin (Settings → Community plugins → Browse).
+2. Open BRAT's settings (or run **BRAT: Add a beta plugin for testing**) and add this repo: `zachhall/drawsteel-hero-importer`.
+3. BRAT downloads `main.js`, `manifest.json`, and `styles.css` from the latest [release](../../releases) and enables the plugin. Run **BRAT: Check for updates to all beta plugins** to pull in future releases.
+
+### Manual installation
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from a [release](../../releases) (or build from source, below).
+2. Copy them into `<your vault>/.obsidian/plugins/drawsteel-hero-importer/`.
+3. Reload Obsidian and enable **Draw Steel Hero Importer** under Settings → Community plugins.
 
 ## Usage
 
-1. Run the **Import Draw Steel Hero (.ds-hero)** command (or click the ribbon icon).
+1. Run the **Import Draw Steel Hero (.ds-hero)** command, click the ribbon icon, or use the **Choose .ds-hero file...** button in the plugin's settings tab.
 2. Pick a `.ds-hero` file exported from ForgeSteel.
-3. A Note named after the hero is created in the configured destination
-   folder — set this in the plugin's settings tab; it defaults to the vault
-   root. Re-importing the same hero keeps that Note as the current version
-   and archives the previous content into a separate archive folder
-   (`hero-archive` by default), timestamped — also configurable in settings.
+3. The Note opens automatically once imported.
 
-Only the hero's *selected* choices are imported — ancestry traits, culture/
-career features, chosen class abilities and domain features, the active
-kit's granted ability, and the complication. Unselected/available-but-not-
-taken options (e.g. other class abilities you could have picked) are not
-included.
+## Settings
 
-## Notes on accuracy
+- **Destination folder** — vault folder new Hero Notes are created in. Defaults to the vault root.
+- **Archive folder** — vault folder the previous version's content is copied to on re-import. Defaults to `hero-archive` in the vault root.
 
-A `.ds-hero` file doesn't store derived combat stats (Stamina, Speed,
-Stability, Recoveries, Free Strike) directly — ForgeSteel computes them from
-`Bonus`-type features scattered across ancestry/culture/career/class/kit.
-This plugin reimplements that computation independently (from the public
-Draw Steel rules, not from ForgeSteel's GPL-3.0 source) in
-`src/hero-stats.ts`. `class.level` and `class.characteristics`, however, are
-stored directly in the export and are read as-is.
-
-Ability "Power Roll" bonuses are displayed by characteristic name (e.g.
-`Power Roll + Presence`) rather than as a precomputed number, since resolving
-the exact bonus would require replicating ForgeSteel's full ability-bonus
-logic.
-
-## Development
+## Building from source
 
 ```
 npm install
