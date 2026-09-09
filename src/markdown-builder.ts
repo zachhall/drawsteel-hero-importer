@@ -214,11 +214,14 @@ const SOURCE_GROUPS: { title: string; prefix: string }[] = [
 	{ title: "Ancestry", prefix: "Ancestry:" },
 	{ title: "Culture", prefix: "Culture:" },
 	{ title: "Career", prefix: "Career:" },
-	{ title: "Class Features", prefix: "Class:" },
+	{ title: "Actions", prefix: "Class:" },
 	{ title: "Kit", prefix: "Kit:" },
 	{ title: "Domain", prefix: "Domain:" },
 	{ title: "Complication", prefix: "Complication:" },
 ];
+
+/** Groups combined under one collapsible "## Background Info" section at the end of the Note, rather than each getting its own top-level heading in build order. */
+const BACKGROUND_INFO_GROUP_TITLES = new Set(["Ancestry", "Career", "Domain", "Complication"]);
 
 function groupFeatures(features: FlatFeature[]): { title: string; items: FlatFeature[] }[] {
 	const groups: { title: string; items: FlatFeature[] }[] = SOURCE_GROUPS.map((g) => ({ title: g.title, items: [] as FlatFeature[] }));
@@ -240,7 +243,7 @@ function groupFeatures(features: FlatFeature[]): { title: string; items: FlatFea
 
 /**
  * Abilities granted by a Kit, Domain, or Complication belong under the same
- * action-type H3s as the class's own abilities (see renderClassFeaturesGroup)
+ * action-type H3s as the class's own abilities (see renderActionsGroup)
  * rather than getting a separate un-bucketed listing under their own ##
  * heading — retagging their `source` to "Class:" before grouping is enough
  * to relocate them, since `source` is only ever read for grouping (never
@@ -251,7 +254,7 @@ function groupFeatures(features: FlatFeature[]): { title: string; items: FlatFea
  */
 const ABILITY_SOURCE_PREFIXES_MIGRATED_TO_CLASS = ["Kit:", "Domain:", "Complication:"];
 
-function migrateGrantedAbilitiesToClassFeatures(features: FlatFeature[]): FlatFeature[] {
+function migrateGrantedAbilitiesToActions(features: FlatFeature[]): FlatFeature[] {
 	return features.map((f) => {
 		if (f.kind === "ability" && ABILITY_SOURCE_PREFIXES_MIGRATED_TO_CLASS.some((p) => f.source.startsWith(p))) {
 			return { ...f, source: `Class: ${f.source}` };
@@ -260,14 +263,19 @@ function migrateGrantedAbilitiesToClassFeatures(features: FlatFeature[]): FlatFe
 	});
 }
 
-function renderFeature(feature: FlatFeature, resourceName: string | undefined, characteristics: Record<string, number>): string {
+function renderFeature(
+	feature: FlatFeature,
+	resourceName: string | undefined,
+	characteristics: Record<string, number>,
+	headingLevel = "###"
+): string {
 	switch (feature.kind) {
 		case "ability":
 			return dsBlock("ds-feature", abilityToFeatureBlock(feature.ability, resourceName, characteristics));
 		case "text":
 			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description));
 		case "resource": {
-			const parts = [`### ${feature.name}`];
+			const parts = [`${headingLevel} ${feature.name}`];
 			if (feature.details) parts.push(feature.details);
 
 			// A gain's value is usually a flat number (Wrath's "+2 per round"), which
@@ -324,13 +332,15 @@ const ABILITY_USAGE_GROUPS: { title: string; match: (usage: string) => boolean }
 ];
 
 /**
- * Renders the Class Features group: non-ability features (traits, etc.) are
- * listed as-is, and Ability features are split out under H3 action-type
- * headings (Main Action / Maneuver / Move/Movement / Triggered Action, plus
- * an "Other" catch-all for any usage string that doesn't match one of those,
- * e.g. a future ForgeSteel usage value this list hasn't seen yet).
+ * Renders the Actions group (the class's own abilities plus any migrated in
+ * from a Kit/Domain/Complication — see migrateGrantedAbilitiesToActions):
+ * non-ability features (traits, etc.) are listed as-is, and Ability features
+ * are split out under H3 action-type headings (Main Action / Maneuver / Move
+ * Action / Triggered Action, plus an "Other" catch-all for any usage string
+ * that doesn't match one of those, e.g. a future ForgeSteel usage value this
+ * list hasn't seen yet).
  */
-function renderClassFeaturesGroup(items: FlatFeature[], resourceName: string | undefined, characteristics: Record<string, number>): string {
+function renderActionsGroup(items: FlatFeature[], resourceName: string | undefined, characteristics: Record<string, number>): string {
 	const abilities = items.filter((f): f is Extract<FlatFeature, { kind: "ability" }> => f.kind === "ability");
 	const others = items.filter((f) => f.kind !== "ability");
 
@@ -423,36 +433,75 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		presence: stats.characteristics["Presence"] ?? 0,
 	});
 
-	const combatValues = [
-		{ Level: stats.level },
-		{ Stamina: stats.stamina },
-		{ Recoveries: stats.recoveries },
-		{ "Recovery Value": stats.recoveryValue },
-		{ Speed: stats.speed },
-		{ Stability: stats.stability },
-		{ Disengage: stats.disengage },
-		{ "Free Strike": stats.freeStrike },
-		{ Size: stats.size },
-		...stats.otherBonuses.map((b) => ({ [b.field]: b.value })),
-	];
-	const combatStatsBlock = dsBlock("ds-values-row", { values: combatValues });
+	// current_stamina/temp_stamina reflect the hero's actual condition at
+	// export time (state.staminaDamage/staminaTemp), not always a full bar —
+	// a fresh import with no damage taken naturally comes out equal to max.
+	const vitalsBlock = dsBlock("ds-stamina", {
+		collapsible: true,
+		collapse_default: false,
+		max_stamina: stats.stamina,
+		current_stamina: stats.stamina - (hero.state.staminaDamage ?? 0),
+		temp_stamina: hero.state.staminaTemp ?? 0,
+		height: 1,
+		style: "default",
+	});
+
+	// Wrath/Surges/Victories/XP/Renown/Wealth are all state the hero already
+	// has a running total for — read straight from hero.state (and the
+	// Heroic Resource feature's own current value for the first row), not
+	// derived from Bonus features the way Statistics below is.
+	const resourceValues: Record<string, number>[] = [];
+	if (resourceFeature) resourceValues.push({ [resourceFeature.name]: resourceFeature.currentValue });
+	resourceValues.push(
+		{ Surges: hero.state.surges ?? 0 },
+		{ Victories: hero.state.victories ?? 0 },
+		{ XP: hero.state.xp ?? 0 },
+		{ Renown: hero.state.renown ?? 0 },
+		{ Wealth: hero.state.wealth ?? 0 }
+	);
+	const resourcesBlock = dsBlock("ds-values-row", { values: resourceValues });
+
+	const statisticsBlock = dsBlock("ds-values-row", {
+		values: [
+			{ Speed: stats.speed },
+			{ Stability: stats.stability },
+			{ Disengage: stats.disengage },
+			{ "Free Strike": stats.freeStrike },
+			{ Size: stats.size },
+		],
+	});
 
 	const skillsBlock = flat.skills.length ? dsBlock("ds-skills", buildSkillsYaml(flat.skills)) : undefined;
 
-	const languagesSection = flat.languages.length ? `## Languages\n\n${flat.languages.map((l) => `- ${l}`).join("\n")}` : undefined;
+	const nonResourceFeatures = migrateGrantedAbilitiesToActions(flat.features.filter((f) => f.kind !== "resource"));
+	const featureGroups = groupFeatures(nonResourceFeatures);
 
-	const featureGroups = groupFeatures(migrateGrantedAbilitiesToClassFeatures(flat.features.filter((f) => f.kind !== "resource")));
-	const featureSections = featureGroups.map((g) => {
-		const body =
-			g.title === "Class Features"
-				? renderClassFeaturesGroup(g.items, resourceFeature?.name, stats.characteristics)
-				: g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n");
-		return `## ${g.title}\n\n${body}`;
-	});
+	// Ancestry/Career/Domain/Complication are rarely referenced during play —
+	// bundled into one "Background Info" section (as H3s) at the very end of
+	// the Note instead of each getting its own top-level heading in the
+	// middle, so folding that one heading collapses all of them together.
+	const mainGroups = featureGroups.filter((g) => !BACKGROUND_INFO_GROUP_TITLES.has(g.title));
+	const backgroundInfoGroups = featureGroups.filter((g) => BACKGROUND_INFO_GROUP_TITLES.has(g.title));
 
-	const resourceSection = resourceFeature
-		? `## Heroic Resource\n\n${renderFeature(resourceFeature, undefined, stats.characteristics)}`
+	const renderGroupBody = (g: { title: string; items: FlatFeature[] }) =>
+		g.title === "Actions"
+			? renderActionsGroup(g.items, resourceFeature?.name, stats.characteristics)
+			: g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n");
+
+	const featureSections = mainGroups.map((g) => `## ${g.title}\n\n${renderGroupBody(g)}`);
+
+	const backgroundInfoSection = backgroundInfoGroups.length
+		? `## Background Info\n\n${backgroundInfoGroups.map((g) => `### ${g.title}\n\n${renderGroupBody(g)}`).join("\n\n")}`
 		: undefined;
+
+	const detailsParts: string[] = [];
+	if (flat.languages.length) {
+		detailsParts.push(`### Languages\n\n${flat.languages.map((l) => `- ${l}`).join("\n")}`);
+	}
+	if (resourceFeature) {
+		detailsParts.push(`### Heroic Resource\n\n${renderFeature(resourceFeature, undefined, stats.characteristics, "####")}`);
+	}
+	const detailsSection = detailsParts.length ? `## Details\n\n${detailsParts.join("\n\n")}` : undefined;
 
 	const notesSection = hero.state.notes ? `## Notes\n\n${hero.state.notes}` : undefined;
 
@@ -464,12 +513,14 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		`*Level ${stats.level} ${hero.ancestry?.name ?? ""} ${hero.class?.name ?? ""}*`.trim(),
 		backgroundCallout,
 		`## Characteristics\n\n${characteristicsBlock}`,
-		`## Combat Stats\n\n${combatStatsBlock}`,
+		`## Vitals\n\n${vitalsBlock}`,
+		`## Resources\n\n${resourcesBlock}`,
+		`## Statistics\n\n${statisticsBlock}`,
 		skillsBlock ? `## Skills\n\n${skillsBlock}` : undefined,
-		languagesSection,
-		resourceSection,
 		...featureSections,
+		detailsSection,
 		notesSection,
+		backgroundInfoSection,
 	].filter((s): s is string => !!s);
 
 	return sections.join("\n\n");

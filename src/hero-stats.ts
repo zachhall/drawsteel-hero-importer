@@ -11,8 +11,6 @@ export interface HeroStats {
 	disengage: number;
 	freeStrike: number;
 	size: string;
-	/** Bonus fields present on the hero that this calculator doesn't have a dedicated slot for (e.g. Renown, Wealth). */
-	otherBonuses: { field: string; value: number }[];
 }
 
 /** Draw Steel echelon: 1-3 => 1, 4-6 => 2, 7-9 => 3, 10 => 4. */
@@ -38,8 +36,6 @@ function modifierValue(data: DsBonusData, characteristics: DsCharacteristicValue
 
 	return value;
 }
-
-const KNOWN_FIELDS = new Set(["Stamina", "Recoveries", "Speed", "Stability", "Disengage"]);
 
 /**
  * Recomputes the derived combat stats a .ds-hero file doesn't store directly.
@@ -74,11 +70,6 @@ export function computeHeroStats(hero: DsHero, bonuses: DsBonusData[], kits: DsK
 	// Agility, minimum 0.
 	const freeStrike = Math.max(characteristics["Might"] ?? 0, characteristics["Agility"] ?? 0, 0);
 
-	const otherBonuses = Array.from(new Set(bonuses.map((b) => b.field)))
-		.filter((field) => !KNOWN_FIELDS.has(field))
-		.map((field) => ({ field, value: sumField(field) }))
-		.filter((b) => b.value !== 0);
-
 	return {
 		level,
 		characteristics,
@@ -90,6 +81,5 @@ export function computeHeroStats(hero: DsHero, bonuses: DsBonusData[], kits: DsK
 		disengage,
 		freeStrike,
 		size: "1M",
-		otherBonuses,
 	};
 }

@@ -8,6 +8,8 @@ export type FlatFeature =
 			source: string;
 			name: string;
 			details: string;
+			/** The hero's current banked amount of this resource (e.g. Wrath currently at 0), read directly from the hero's state — not derived. */
+			currentValue: number;
 			gains: { trigger: string; value: string; frequency: string }[];
 	  }
 	| { kind: "immunity"; source: string; name: string; conditions: string[] };
@@ -96,6 +98,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 					source,
 					name: feature.name,
 					details: data.details ?? "",
+					currentValue: data.value ?? 0,
 					gains: data.gains ?? [],
 				});
 				return;

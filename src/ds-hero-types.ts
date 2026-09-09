@@ -199,6 +199,7 @@ export interface DsHeroState {
 	staminaDamage: number;
 	staminaTemp: number;
 	recoveriesUsed: number;
+	surges: number;
 	victories: number;
 	xp: number;
 	renown: number;

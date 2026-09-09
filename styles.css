@@ -97,3 +97,35 @@
 .block-language-ds-counter .ds-counter-container {
 	width: auto;
 }
+
+/* ---------------------------------------------------------------------- */
+/* ds-skills                                                               */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * Stock ds-elements styling lists every skill in one single-column <ul> per
+ * group, which runs long for a hero with several skill groups. CSS multi-
+ * column layout flows the existing list items into two columns without
+ * touching ds-elements' own markup or per-item styling (checkbox indicator,
+ * flex row, etc.) — break-inside: avoid keeps a skill's indicator+name from
+ * splitting across the column break.
+ *
+ * ds-skills renders via a Vue component, not plain createEl calls like
+ * ds-characteristics/ds-counter — its real DOM uses bare "skill-list"/
+ * "skill-item" classes (confirmed by reading the compiled component in
+ * draw-steel-elements' own main.js), NOT the ".ds-skill-list"/".ds-skill-
+ * item" names its shipped styles.css targets — that stylesheet's skills
+ * section appears to predate the Vue rewrite and no longer matches anything.
+ * Scoped under Obsidian's own ".block-language-ds-skills" codeblock wrapper
+ * (present for every processed codeblock regardless of how the plugin
+ * renders it) since "skill-list"/"skill-item" alone are too generic to
+ * target safely on their own.
+ */
+.block-language-ds-skills .skill-list {
+	column-count: 2;
+	column-gap: 1.5em;
+}
+
+.block-language-ds-skills .skill-item {
+	break-inside: avoid;
+}
