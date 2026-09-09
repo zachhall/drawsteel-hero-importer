@@ -71,20 +71,21 @@
 /* ---------------------------------------------------------------------- */
 
 /*
- * The Note emits one ds-counter codeblock per Heroic Resource gain (e.g. one
- * for each of a Wrath's trigger amounts) rather than one block holding all
+ * The Note emits one ds-counter codeblock per Resources value (Wrath,
+ * Surges, Victories, XP, Renown, Wealth) rather than one block holding all
  * of them — ds-counter's schema is a single value, it has no multi-entry
- * form the way ds-values-row does. Obsidian wraps each processed codeblock
- * in its own ".block-language-<lang>" container, which is display:block by
- * default, so consecutive counters stack with a full line each and a lot of
- * dead space. Switching that wrapper to inline-flex is enough to make
- * consecutive counters flow into a row and wrap onto a new one when they run
- * out of width — no extra wrapper markup needed, and ds-elements' own
- * .ds-counter-container rules (width: 100% among them) still apply, they
- * just now size against this shrink-to-fit wrapper instead of the full Note
- * width.
+ * form the way ds-values-row does. Each ~~~ds-counter~~~ fence is still, at
+ * the markdown level, a code block — Obsidian wraps every code block's
+ * *rendered* content in a generic ".el-pre" container (confirmed via
+ * DevTools: ds-elements' own ".block-language-ds-counter" div sits one level
+ * *inside* that, not at the top), and that outer ".el-pre" is what's actually
+ * display:block, stacking consecutive counters one per line regardless of
+ * any display change on the inner div. Targeting ".el-pre" directly would
+ * also catch every *other* code block in the Note (ds-feature, etc.), so
+ * ":has(> .block-language-ds-counter)" scopes it to only the ".el-pre"
+ * wrappers that actually contain a counter.
  */
-.block-language-ds-counter {
+.el-pre:has(> .block-language-ds-counter) {
 	display: inline-flex;
 	width: auto;
 	margin: 0 0.5em 0.5em 0;
@@ -94,6 +95,7 @@
 	border-radius: var(--radius-m);
 }
 
+.block-language-ds-counter,
 .block-language-ds-counter .ds-counter-container {
 	width: auto;
 }

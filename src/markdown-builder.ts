@@ -275,35 +275,10 @@ function renderFeature(
 		case "text":
 			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description));
 		case "resource": {
-			const parts = [`${headingLevel} ${feature.name}`];
-			if (feature.details) parts.push(feature.details);
-
-			// A gain's value is usually a flat number (Wrath's "+2 per round"), which
-			// reads well as a ds-counter tile. It's occasionally non-numeric instead
-			// (e.g. an epic resource gaining "XP gained" on respite) — ds-counter's
-			// current_value is strictly numeric, so those fall back to a plain bullet
-			// rather than emitting a counter that can't actually display the value.
-			const counterGains = feature.gains.filter((g) => Number.isFinite(Number(g.value)));
-			const bulletGains = feature.gains.filter((g) => !Number.isFinite(Number(g.value)));
-
-			// ds-elements renders each ds-counter codeblock as its own full-width
-			// block by default; styles.css targets Obsidian's per-codeblock
-			// ".block-language-ds-counter" wrapper to lay consecutive counters out
-			// as a single row instead. Wrapping these in raw HTML to group them
-			// isn't an option — Obsidian (like standard Markdown) doesn't reliably
-			// re-parse fenced code blocks nested inside an HTML block.
-			counterGains.forEach((g) =>
-				parts.push(
-					dsBlock("ds-counter", {
-						name: `${g.trigger} (${g.frequency})`,
-						current_value: Number(g.value),
-						min_value: 0,
-					})
-				)
-			);
-			bulletGains.forEach((g) => parts.push(`- **${g.trigger}**: ${g.value} (${g.frequency})`));
-
-			return parts.join("\n\n");
+			const lines = [`${headingLevel} ${feature.name}`];
+			if (feature.details) lines.push(feature.details);
+			feature.gains.forEach((g) => lines.push(`- **${g.trigger}**: +${g.value} (${g.frequency})`));
+			return lines.join("\n");
 		}
 		case "immunity":
 			return `- **${feature.name}**: Immunity to ${feature.conditions.join(", ")}`;
@@ -448,18 +423,23 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 
 	// Wrath/Surges/Victories/XP/Renown/Wealth are all state the hero already
 	// has a running total for — read straight from hero.state (and the
-	// Heroic Resource feature's own current value for the first row), not
-	// derived from Bonus features the way Statistics below is.
-	const resourceValues: Record<string, number>[] = [];
-	if (resourceFeature) resourceValues.push({ [resourceFeature.name]: resourceFeature.currentValue });
-	resourceValues.push(
-		{ Surges: hero.state.surges ?? 0 },
-		{ Victories: hero.state.victories ?? 0 },
-		{ XP: hero.state.xp ?? 0 },
-		{ Renown: hero.state.renown ?? 0 },
-		{ Wealth: hero.state.wealth ?? 0 }
+	// Heroic Resource feature's own current value for the first entry), not
+	// derived from Bonus features the way Statistics below is. Each is its
+	// own ds-counter (rather than one ds-values-row) so the player can click
+	// +/- to track them during play; styles.css lays consecutive counters out
+	// in a single row.
+	const resourceEntries: [string, number][] = [];
+	if (resourceFeature) resourceEntries.push([resourceFeature.name, resourceFeature.currentValue]);
+	resourceEntries.push(
+		["Surges", hero.state.surges ?? 0],
+		["Victories", hero.state.victories ?? 0],
+		["XP", hero.state.xp ?? 0],
+		["Renown", hero.state.renown ?? 0],
+		["Wealth", hero.state.wealth ?? 0]
 	);
-	const resourcesBlock = dsBlock("ds-values-row", { values: resourceValues });
+	const resourcesBlock = resourceEntries
+		.map(([name, value]) => dsBlock("ds-counter", { name, current_value: value, min_value: 0 }))
+		.join("\n\n");
 
 	const statisticsBlock = dsBlock("ds-values-row", {
 		values: [
