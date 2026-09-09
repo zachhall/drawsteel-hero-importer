@@ -386,16 +386,29 @@ function buildBackgroundCallout(hero: DsHero, flat: FlattenResult, links: Backgr
 export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult, links?: BackgroundLinks): string {
 	const resourceFeature = flat.features.find((f): f is Extract<FlatFeature, { kind: "resource" }> => f.kind === "resource");
 
+	// Frontmatter is Director-facing reference data meant to populate a Base/
+	// Dataview view across every PC — not a mirror of the whole Note. Culture
+	// and Career stay body-only (not useful to filter/sort a Director's PC
+	// list on). Of the numeric stats, only ones that don't fluctuate mid-
+	// encounter are included (e.g. Victories/XP, not Surges/the Heroic
+	// Resource's current value, which reset/change constantly in play).
 	const frontmatter = yaml
 		.dump(
 			stripUndefined({
 				ds_hero: true,
 				name: hero.name,
 				ancestry: hero.ancestry?.name,
-				culture: hero.culture?.name,
-				career: hero.career?.name,
 				class: hero.class?.name,
 				level: stats.level,
+				might: stats.characteristics["Might"] ?? 0,
+				agility: stats.characteristics["Agility"] ?? 0,
+				reason: stats.characteristics["Reason"] ?? 0,
+				intuition: stats.characteristics["Intuition"] ?? 0,
+				presence: stats.characteristics["Presence"] ?? 0,
+				victories: hero.state.victories ?? 0,
+				xp: hero.state.xp ?? 0,
+				max_stamina: stats.stamina,
+				speed: stats.speed,
 			})
 		)
 		.trimEnd();
