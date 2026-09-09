@@ -254,6 +254,61 @@ function renderFeature(feature: FlatFeature, resourceName: string | undefined, c
 	}
 }
 
+/**
+ * Action-type buckets Class Feature abilities are organized under, in this
+ * fixed order. Each is an H3 — Obsidian folds any heading by default, so
+ * these are collapsible without any extra callout syntax. A bucket with no
+ * matching abilities on a given hero is dropped entirely (see
+ * renderClassFeaturesGroup) rather than rendered empty.
+ *
+ * "Move" here covers the rulebook's Move action type (e.g. the null's
+ * level-5 ability Phase Leap, confirmed via drawsteel-assistant — no example
+ * of this usage exists in the Hellic test fixture) — matched loosely as
+ * "Move"/"Movement" since ForgeSteel data isn't necessarily consistent about
+ * which spelling it exports, even though the heading itself reads "Move
+ * Action" to match the style of the other three.
+ */
+const ABILITY_USAGE_GROUPS: { title: string; match: (usage: string) => boolean }[] = [
+	{ title: "Main Action", match: (u) => /main action/i.test(u) },
+	{ title: "Maneuver", match: (u) => /maneuver/i.test(u) },
+	{ title: "Move Action", match: (u) => /^move(ment)?( action)?$/i.test(u.trim()) },
+	{ title: "Triggered Action", match: (u) => /triggered action/i.test(u) },
+];
+
+/**
+ * Renders the Class Features group: non-ability features (traits, etc.) are
+ * listed as-is, and Ability features are split out under H3 action-type
+ * headings (Main Action / Maneuver / Move/Movement / Triggered Action, plus
+ * an "Other" catch-all for any usage string that doesn't match one of those,
+ * e.g. a future ForgeSteel usage value this list hasn't seen yet).
+ */
+function renderClassFeaturesGroup(items: FlatFeature[], resourceName: string | undefined, characteristics: Record<string, number>): string {
+	const abilities = items.filter((f): f is Extract<FlatFeature, { kind: "ability" }> => f.kind === "ability");
+	const others = items.filter((f) => f.kind !== "ability");
+
+	const parts: string[] = others.map((f) => renderFeature(f, resourceName, characteristics));
+
+	const buckets = ABILITY_USAGE_GROUPS.map((g) => ({ title: g.title, items: [] as typeof abilities }));
+	const otherAbilities: typeof abilities = [];
+	abilities.forEach((f) => {
+		const bucket = ABILITY_USAGE_GROUPS.find((g) => g.match(f.ability.type.usage));
+		if (bucket) {
+			buckets.find((b) => b.title === bucket.title)!.items.push(f);
+		} else {
+			otherAbilities.push(f);
+		}
+	});
+	if (otherAbilities.length) buckets.push({ title: "Other", items: otherAbilities });
+
+	buckets
+		.filter((b) => b.items.length > 0)
+		.forEach((b) => {
+			parts.push(`### ${b.title}\n\n${b.items.map((f) => renderFeature(f, resourceName, characteristics)).join("\n\n")}`);
+		});
+
+	return parts.join("\n\n");
+}
+
 export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult): string {
 	const resourceFeature = flat.features.find((f): f is Extract<FlatFeature, { kind: "resource" }> => f.kind === "resource");
 
@@ -298,9 +353,13 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 	const languagesSection = flat.languages.length ? `## Languages\n\n${flat.languages.map((l) => `- ${l}`).join("\n")}` : undefined;
 
 	const featureGroups = groupFeatures(flat.features.filter((f) => f.kind !== "resource"));
-	const featureSections = featureGroups.map(
-		(g) => `## ${g.title}\n\n${g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n")}`
-	);
+	const featureSections = featureGroups.map((g) => {
+		const body =
+			g.title === "Class Features"
+				? renderClassFeaturesGroup(g.items, resourceFeature?.name, stats.characteristics)
+				: g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n");
+		return `## ${g.title}\n\n${body}`;
+	});
 
 	const resourceSection = resourceFeature
 		? `## Heroic Resource\n\n${renderFeature(resourceFeature, undefined, stats.characteristics)}`
