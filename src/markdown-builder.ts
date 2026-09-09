@@ -267,10 +267,35 @@ function renderFeature(feature: FlatFeature, resourceName: string | undefined, c
 		case "text":
 			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description));
 		case "resource": {
-			const lines = [`### ${feature.name}`];
-			if (feature.details) lines.push(feature.details);
-			feature.gains.forEach((g) => lines.push(`- **${g.trigger}**: +${g.value} (${g.frequency})`));
-			return lines.join("\n");
+			const parts = [`### ${feature.name}`];
+			if (feature.details) parts.push(feature.details);
+
+			// A gain's value is usually a flat number (Wrath's "+2 per round"), which
+			// reads well as a ds-counter tile. It's occasionally non-numeric instead
+			// (e.g. an epic resource gaining "XP gained" on respite) — ds-counter's
+			// current_value is strictly numeric, so those fall back to a plain bullet
+			// rather than emitting a counter that can't actually display the value.
+			const counterGains = feature.gains.filter((g) => Number.isFinite(Number(g.value)));
+			const bulletGains = feature.gains.filter((g) => !Number.isFinite(Number(g.value)));
+
+			// ds-elements renders each ds-counter codeblock as its own full-width
+			// block by default; styles.css targets Obsidian's per-codeblock
+			// ".block-language-ds-counter" wrapper to lay consecutive counters out
+			// as a single row instead. Wrapping these in raw HTML to group them
+			// isn't an option — Obsidian (like standard Markdown) doesn't reliably
+			// re-parse fenced code blocks nested inside an HTML block.
+			counterGains.forEach((g) =>
+				parts.push(
+					dsBlock("ds-counter", {
+						name: `${g.trigger} (${g.frequency})`,
+						current_value: Number(g.value),
+						min_value: 0,
+					})
+				)
+			);
+			bulletGains.forEach((g) => parts.push(`- **${g.trigger}**: ${g.value} (${g.frequency})`));
+
+			return parts.join("\n\n");
 		}
 		case "immunity":
 			return `- **${feature.name}**: Immunity to ${feature.conditions.join(", ")}`;
