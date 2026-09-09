@@ -1,7 +1,8 @@
-import { Notice, Plugin, TFile, normalizePath } from "obsidian";
+import { Notice, Plugin, TAbstractFile, TFile, normalizePath } from "obsidian";
 import { readFile } from "fs/promises";
 import { resolveBackgroundLinks } from "./src/compendium-links";
 import { DsHero } from "./src/ds-hero-types";
+import { extractDsCounterValues, FRONTMATTER_SYNCED_COUNTERS } from "./src/frontmatter-sync";
 import { flattenHeroFeatures } from "./src/feature-flatten";
 import { computeHeroStats } from "./src/hero-stats";
 import { buildHeroNote } from "./src/markdown-builder";
@@ -46,6 +47,34 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		});
 
 		this.addSettingTab(new HeroImporterSettingTab(this.app, this));
+
+		// Clicking a ds-counter's +/- rewrites that codeblock's own YAML, not the
+		// Note's frontmatter — this is what keeps a synced property (see
+		// FRONTMATTER_SYNCED_COUNTERS) following it instead.
+		this.registerEvent(this.app.vault.on("modify", (file) => this.syncCounterPropertiesToFrontmatter(file)));
+	}
+
+	private async syncCounterPropertiesToFrontmatter(file: TAbstractFile) {
+		if (!(file instanceof TFile) || file.extension !== "md") return;
+
+		const cache = this.app.metadataCache.getFileCache(file);
+		if (!cache?.frontmatter?.ds_hero) return;
+
+		const content = await this.app.vault.read(file);
+		const counterValues = extractDsCounterValues(content);
+
+		const updates: Record<string, number> = {};
+		for (const [counterName, propertyName] of Object.entries(FRONTMATTER_SYNCED_COUNTERS)) {
+			const value = counterValues.get(counterName);
+			if (value !== undefined && cache.frontmatter?.[propertyName] !== value) {
+				updates[propertyName] = value;
+			}
+		}
+		if (!Object.keys(updates).length) return;
+
+		await this.app.fileManager.processFrontMatter(file, (fm) => {
+			Object.assign(fm, updates);
+		});
 	}
 
 	async importAsNote() {

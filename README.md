@@ -19,6 +19,8 @@ codeblocks.
 - Abilities are grouped under Actions by action type (Main Action, Maneuver, Move Action, Triggered Action). Abilities granted by a Kit, Domain, or Complication are merged into the same groups.
 - Ability Power Rolls and tier damage are resolved to the hero's actual characteristic and potency values (e.g. `Power Roll + 2`, `5 + 2 psychic damage`), not left as characteristic names — compatible with Power Roll Detector.
 - A collapsible Background box links Culture, Career, subclass/Order, Domain, and Kit to matching notes in a `DS Compendium` vault folder, where one exists.
+- Frontmatter properties (name, ancestry, class, level, characteristics, Victories, XP, max stamina, speed) are set for quick reference — e.g. a Base/Dataview view across every PC.
+- Victories and XP frontmatter properties stay in sync with their `ds-counter` blocks under Resources — editing a counter (in Reading view or the block's own YAML) updates the matching property automatically.
 - Re-importing a hero keeps `Name.md` as the current Note and archives the previous version into a timestamped file in an archive folder.
 - Ships a `styles.css` with additive visual styling for `ds-characteristics`, `ds-values-row`, `ds-counter`, and `ds-skills`.
 
