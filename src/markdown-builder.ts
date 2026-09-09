@@ -6,6 +6,63 @@ import { findKnownUnsupportedSkillGroup, findOfficialSkill } from "./skill-data"
 
 const FENCE = "~~~";
 
+const CHARACTERISTIC_SHORTHAND: Record<string, string> = {
+	M: "Might",
+	A: "Agility",
+	R: "Reason",
+	I: "Intuition",
+	P: "Presence",
+};
+
+/**
+ * Tier text (e.g. "5 + P psychic damage") uses single-letter characteristic
+ * shorthand for the hero's own bonus damage — only ever appearing right after
+ * a "+", sometimes as a choice like "M or A damage" (use whichever is
+ * higher). Elsewhere in the same string a letter can appear as part of a
+ * potency check instead (e.g. "P < [weak]", meaning "the target resists
+ * unless their Presence is less than your weak potency value") — that's left
+ * untouched by only matching the "+ <letter>" addition shape; see
+ * resolvePotencyThresholds for the "[weak]"/etc. half of that.
+ *
+ * Per the user's explicit request: substitute the shorthand with the hero's
+ * actual characteristic value, but don't fold it into the base damage number
+ * — keep them as separate addends so the player can still see how much of
+ * the total came from their characteristic.
+ */
+function resolveDamageBonusShorthand(text: string | undefined, characteristics: Record<string, number>): string | undefined {
+	if (!text) return text;
+	return text.replace(/\+ ([MARIP])(?:\s+or\s+([MARIP]))?(?=[^a-zA-Z]|$)/g, (match, c1: string, c2?: string) => {
+		const value1 = characteristics[CHARACTERISTIC_SHORTHAND[c1]] ?? 0;
+		if (!c2) return `+ ${value1}`;
+		const value2 = characteristics[CHARACTERISTIC_SHORTHAND[c2]] ?? 0;
+		return `+ ${Math.max(value1, value2)}`;
+	});
+}
+
+/**
+ * "[weak]"/"[average]"/"[strong]" placeholders (e.g. "I < [weak]") stand for
+ * the hero's potency values, per the Draw Steel rules: weak = highest
+ * characteristic score − 2, average = highest − 1, strong = highest —
+ * always based on the hero's single highest characteristic, regardless of
+ * which characteristic the target resists with. Once resolved to numbers a
+ * player can read the check directly (e.g. "I < 0") without doing the math
+ * at the table.
+ */
+function resolvePotencyThresholds(text: string | undefined, characteristics: Record<string, number>): string | undefined {
+	if (!text) return text;
+	const highest = Math.max(...Object.values(characteristics), 0);
+	const POTENCY_VALUES: Record<string, number> = {
+		weak: highest - 2,
+		average: highest - 1,
+		strong: highest,
+	};
+	return text.replace(/\[(weak|average|strong)\]/gi, (match, tier: string) => String(POTENCY_VALUES[tier.toLowerCase()]));
+}
+
+function resolveTierText(text: string | undefined, characteristics: Record<string, number>): string | undefined {
+	return resolvePotencyThresholds(resolveDamageBonusShorthand(text, characteristics), characteristics);
+}
+
 function dsBlock(language: string, body: Record<string, unknown>): string {
 	const clean = stripUndefined(body);
 	const dump = yaml.dump(clean, { lineWidth: -1, noRefs: true }).trimEnd();
@@ -51,16 +108,21 @@ function formatDistance(distances: DsAbilityDistance[]): string | undefined {
 		.join(", ");
 }
 
-function mapSections(sections: DsAbilitySection[]): Record<string, unknown>[] {
+function mapSections(sections: DsAbilitySection[], characteristics: Record<string, number>): Record<string, unknown>[] {
 	const mapped: (Record<string, unknown> | undefined)[] = sections.map((s) => {
 		if (s.type === "roll" && s.roll) {
-			const characteristic = s.roll.characteristic.join("/");
-			const bonus = s.roll.bonus ? ` + ${s.roll.bonus}` : "";
+			// An ability listing multiple characteristics (e.g. "Might/Agility") uses
+			// whichever is highest, per the Draw Steel rules. power-roll-detector only
+			// makes a roll clickable when it sees a literal number after "Power Roll +",
+			// so the characteristic name has to be resolved to the hero's actual value
+			// here rather than left as a name.
+			const best = Math.max(...s.roll.characteristic.map((c) => characteristics[c] ?? 0));
+			const total = best + (s.roll.bonus ?? 0);
 			return {
-				roll: `Power Roll + ${characteristic}${bonus}`,
-				tier1: s.roll.tier1,
-				tier2: s.roll.tier2,
-				tier3: s.roll.tier3,
+				roll: `Power Roll + ${total}`,
+				tier1: resolveTierText(s.roll.tier1, characteristics),
+				tier2: resolveTierText(s.roll.tier2, characteristics),
+				tier3: resolveTierText(s.roll.tier3, characteristics),
 			};
 		}
 		if (s.type === "text" && s.text) {
@@ -91,7 +153,11 @@ function costDisplay(ability: DsAbility, resourceName: string | undefined): { co
 	return {};
 }
 
-function abilityToFeatureBlock(ability: DsAbility, resourceName: string | undefined): Record<string, unknown> {
+function abilityToFeatureBlock(
+	ability: DsAbility,
+	resourceName: string | undefined,
+	characteristics: Record<string, number>
+): Record<string, unknown> {
 	const { cost, ability_type } = costDisplay(ability, resourceName);
 	return {
 		type: "feature",
@@ -105,7 +171,7 @@ function abilityToFeatureBlock(ability: DsAbility, resourceName: string | undefi
 		distance: formatDistance(ability.distance),
 		target: ability.target || undefined,
 		trigger: ability.type.trigger || undefined,
-		effects: mapSections(ability.sections),
+		effects: mapSections(ability.sections, characteristics),
 	};
 }
 
@@ -171,10 +237,10 @@ function groupFeatures(features: FlatFeature[]): { title: string; items: FlatFea
 	return groups.filter((g) => g.items.length > 0);
 }
 
-function renderFeature(feature: FlatFeature, resourceName: string | undefined): string {
+function renderFeature(feature: FlatFeature, resourceName: string | undefined, characteristics: Record<string, number>): string {
 	switch (feature.kind) {
 		case "ability":
-			return dsBlock("ds-feature", abilityToFeatureBlock(feature.ability, resourceName));
+			return dsBlock("ds-feature", abilityToFeatureBlock(feature.ability, resourceName, characteristics));
 		case "text":
 			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description));
 		case "resource": {
@@ -232,9 +298,13 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 	const languagesSection = flat.languages.length ? `## Languages\n\n${flat.languages.map((l) => `- ${l}`).join("\n")}` : undefined;
 
 	const featureGroups = groupFeatures(flat.features.filter((f) => f.kind !== "resource"));
-	const featureSections = featureGroups.map((g) => `## ${g.title}\n\n${g.items.map((f) => renderFeature(f, resourceFeature?.name)).join("\n\n")}`);
+	const featureSections = featureGroups.map(
+		(g) => `## ${g.title}\n\n${g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n")}`
+	);
 
-	const resourceSection = resourceFeature ? `## Heroic Resource\n\n${renderFeature(resourceFeature, undefined)}` : undefined;
+	const resourceSection = resourceFeature
+		? `## Heroic Resource\n\n${renderFeature(resourceFeature, undefined, stats.characteristics)}`
+		: undefined;
 
 	const notesSection = hero.state.notes ? `## Notes\n\n${hero.state.notes}` : undefined;
 
