@@ -1,6 +1,5 @@
 import { Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { readFile } from "fs/promises";
-import { buildHeroCanvas } from "./src/canvas-builder";
 import { DsHero } from "./src/ds-hero-types";
 import { flattenHeroFeatures } from "./src/feature-flatten";
 import { computeHeroStats } from "./src/hero-stats";
@@ -37,19 +36,12 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.addRibbonIcon("user-plus", "Import Draw Steel Hero as Note", () => this.importAsNote());
-		this.addRibbonIcon("layout-dashboard", "Import Draw Steel Hero as Canvas", () => this.importAsCanvas());
+		this.addRibbonIcon("user-plus", "Import Draw Steel Hero", () => this.importAsNote());
 
 		this.addCommand({
 			id: "import-ds-hero",
-			name: "Import Draw Steel Hero as Note (.ds-hero)",
+			name: "Import Draw Steel Hero (.ds-hero)",
 			callback: () => this.importAsNote(),
-		});
-
-		this.addCommand({
-			id: "import-ds-hero-canvas",
-			name: "Import Draw Steel Hero as Canvas (.ds-hero)",
-			callback: () => this.importAsCanvas(),
 		});
 
 		this.addSettingTab(new HeroImporterSettingTab(this.app, this));
@@ -64,23 +56,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits);
 		const content = buildHeroNote(hero, stats, flat);
 
-		const target = await this.writeHeroFile(hero.name, "md", content);
-
-		new Notice(`Imported ${hero.name} to ${target.path}`);
-		const leaf = this.app.workspace.getLeaf(true);
-		await leaf.openFile(target);
-	}
-
-	async importAsCanvas() {
-		const hero = await this.pickHeroFile();
-		if (!hero) return;
-
-		const heroLevel = hero.class?.level ?? 1;
-		const flat = flattenHeroFeatures(hero, heroLevel);
-		const stats = computeHeroStats(hero, flat.bonuses, flat.kits);
-		const canvas = buildHeroCanvas(hero, stats, flat);
-
-		const target = await this.writeHeroFile(hero.name, "canvas", JSON.stringify(canvas, null, 2));
+		const target = await this.writeHeroFile(hero.name, content);
 
 		new Notice(`Imported ${hero.name} to ${target.path}`);
 		const leaf = this.app.workspace.getLeaf(true);
@@ -171,7 +147,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	}
 
 	/**
-	 * Writes a hero to "Name.ext" in the destination folder, always the
+	 * Writes a hero to "Name.md" in the destination folder, always the
 	 * current import. If a file is already there, its *old* content is
 	 * copied into the archive folder as a new file, and the existing file is
 	 * then updated in place with the new content — rather than overwritten
@@ -183,14 +159,14 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	 * the current one. There's no failure case: re-importing a hero always
 	 * succeeds and always keeps the previous version around in the archive.
 	 */
-	private async writeHeroFile(heroName: string, extension: string, content: string): Promise<TFile> {
+	private async writeHeroFile(heroName: string, content: string): Promise<TFile> {
 		const folder = this.settings.destinationFolder ? normalizePath(this.settings.destinationFolder) : "";
 		if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
 			await this.app.vault.createFolder(folder);
 		}
 
 		const baseName = sanitizeFilename(heroName);
-		const path = normalizePath(folder ? `${folder}/${baseName}.${extension}` : `${baseName}.${extension}`);
+		const path = normalizePath(folder ? `${folder}/${baseName}.md` : `${baseName}.md`);
 
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) {
@@ -202,7 +178,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		return this.app.vault.create(path, content);
 	}
 
-	/** Copies a hero's previous Note/Canvas content into the archive folder, timestamped, before it's replaced in place. */
+	/** Copies a hero's previous Note content into the archive folder, timestamped, before it's replaced in place. */
 	private async archiveFileContent(file: TFile, baseName: string): Promise<void> {
 		const archiveFolder = normalizePath(this.settings.archiveFolder || DEFAULT_SETTINGS.archiveFolder);
 		if (!this.app.vault.getAbstractFileByPath(archiveFolder)) {
@@ -210,12 +186,12 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		}
 
 		const stem = `${baseName} - ${formatTimestampForFilename(new Date())}`;
-		let archivePath = normalizePath(`${archiveFolder}/${stem}.${file.extension}`);
+		let archivePath = normalizePath(`${archiveFolder}/${stem}.md`);
 		// Millisecond precision still isn't a guarantee (system clock resolution,
 		// two rapid re-imports landing in the same tick) — fall back to a counter
 		// suffix rather than silently clobbering a still-recent archived version.
 		for (let n = 2; this.app.vault.getAbstractFileByPath(archivePath); n++) {
-			archivePath = normalizePath(`${archiveFolder}/${stem} (${n}).${file.extension}`);
+			archivePath = normalizePath(`${archiveFolder}/${stem} (${n}).md`);
 		}
 
 		const oldContent = await this.app.vault.read(file);

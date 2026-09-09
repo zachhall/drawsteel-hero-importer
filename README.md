@@ -13,9 +13,11 @@ Draw Steel Elements doesn't support Live Preview yet).
 
 1. Run the **Import Draw Steel Hero (.ds-hero)** command (or click the ribbon icon).
 2. Pick a `.ds-hero` file exported from ForgeSteel.
-3. A Note named after the hero is created (or overwritten) in the configured
-   destination folder — set this in the plugin's settings tab; it defaults
-   to the vault root.
+3. A Note named after the hero is created in the configured destination
+   folder — set this in the plugin's settings tab; it defaults to the vault
+   root. Re-importing the same hero keeps that Note as the current version
+   and archives the previous content into a separate archive folder
+   (`hero-archive` by default), timestamped — also configurable in settings.
 
 Only the hero's *selected* choices are imported — ancestry traits, culture/
 career features, chosen class abilities and domain features, the active

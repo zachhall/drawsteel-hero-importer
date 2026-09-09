@@ -4,7 +4,7 @@ import type DrawSteelHeroImporterPlugin from "../main";
 export interface HeroImporterSettings {
 	/** Vault-relative folder to place imported hero notes in. Empty string = vault root. */
 	destinationFolder: string;
-	/** Vault-relative folder outdated Notes/Canvases are moved into on re-import. */
+	/** Vault-relative folder outdated Notes are archived into on re-import. */
 	archiveFolder: string;
 }
 
@@ -26,7 +26,7 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName("Import a Hero as a Note")
+			.setName("Import a Hero")
 			.setDesc(
 				"Upload a .ds-hero file to create a new Hero Note, formatted with the " +
 					"Draw Steel Elements plugin. This is the only file type accepted. " +
@@ -47,22 +47,8 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Import a Hero as a Canvas")
-			.setDesc(
-				"Upload a .ds-hero file to create a new Canvas laid out like MCDM's " +
-					"printed character sheet (identity, characteristics, combat stats, " +
-					"skills, and a grid of ability cards)."
-			)
-			.addButton((button) =>
-				button
-					.setButtonText("Choose .ds-hero file...")
-					.setCta()
-					.onClick(() => this.plugin.importAsCanvas())
-			);
-
-		new Setting(containerEl)
 			.setName("Destination folder")
-			.setDesc("Vault folder new Hero Notes and Canvases are created in. Leave blank to use the vault root.")
+			.setDesc("Vault folder new Hero Notes are created in. Leave blank to use the vault root.")
 			.addText((text) =>
 				text
 					.setPlaceholder("Characters")
@@ -76,8 +62,8 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Archive folder")
 			.setDesc(
-				'Re-importing a hero always keeps "Name.md" (or .canvas) as the current file — the previous ' +
-					'version is moved here first, renamed to "Name - <timestamp>". Leave blank to use ' +
+				'Re-importing a hero always keeps "Name.md" as the current file — the previous version\'s ' +
+					'content is copied here first, as "Name - <timestamp>.md". Leave blank to use ' +
 					`"${DEFAULT_SETTINGS.archiveFolder}" in the vault root.`
 			)
 			.addText((text) =>
