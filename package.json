@@ -1,6 +1,6 @@
 {
 	"name": "drawsteel-hero-importer",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "Imports a ForgeSteel .ds-hero character export into a Draw Steel Elements formatted Note.",
 	"main": "main.js",
 	"scripts": {
