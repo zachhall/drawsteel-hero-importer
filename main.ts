@@ -1,5 +1,6 @@
 import { Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { readFile } from "fs/promises";
+import { resolveBackgroundLinks } from "./src/compendium-links";
 import { DsHero } from "./src/ds-hero-types";
 import { flattenHeroFeatures } from "./src/feature-flatten";
 import { computeHeroStats } from "./src/hero-stats";
@@ -54,7 +55,9 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		const heroLevel = hero.class?.level ?? 1;
 		const flat = flattenHeroFeatures(hero, heroLevel);
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits);
-		const content = buildHeroNote(hero, stats, flat);
+		const notePath = this.computeNotePath(hero.name);
+		const links = resolveBackgroundLinks(this.app, hero, flat, notePath);
+		const content = buildHeroNote(hero, stats, flat, links);
 
 		const target = await this.writeHeroFile(hero.name, content);
 
@@ -146,6 +149,13 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		new Notice(`Failed to import hero: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
+	/** Where "Name.md" for this hero lands, given the current destination folder setting. */
+	private computeNotePath(heroName: string): string {
+		const folder = this.settings.destinationFolder ? normalizePath(this.settings.destinationFolder) : "";
+		const baseName = sanitizeFilename(heroName);
+		return normalizePath(folder ? `${folder}/${baseName}.md` : `${baseName}.md`);
+	}
+
 	/**
 	 * Writes a hero to "Name.md" in the destination folder, always the
 	 * current import. If a file is already there, its *old* content is
@@ -166,7 +176,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		}
 
 		const baseName = sanitizeFilename(heroName);
-		const path = normalizePath(folder ? `${folder}/${baseName}.md` : `${baseName}.md`);
+		const path = this.computeNotePath(heroName);
 
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) {

@@ -125,16 +125,37 @@ export interface DsCharacteristicValue {
 	value: number;
 }
 
+export interface DsSubclass {
+	id: string;
+	name: string;
+	description: string;
+	classID: string;
+	featuresByLevel: { level: number; features: DsFeature[] }[];
+	abilities: DsAbility[];
+	/** Whether the hero picked this option — `subclasses` lists every option the class offers, not just the chosen one(s). */
+	selected: boolean;
+}
+
+export interface DsDomain {
+	id: string;
+	name: string;
+	description: string;
+	featuresByLevel: { level: number; features: DsFeature[] }[];
+}
+
 export interface DsHeroClass {
 	id: string;
 	name: string;
 	description: string;
 	type: string;
+	/** Class-specific label for its subclass concept, e.g. "Order" for the Censor. */
 	subclassName: string;
 	subclassCount: number;
 	primaryCharacteristics: string[];
 	featuresByLevel: { level: number; features: DsFeature[] }[];
 	abilities: DsAbility[];
+	/** Every subclass option the class offers — filter on `.selected` for the hero's actual pick(s). */
+	subclasses: DsSubclass[];
 	level: number;
 	characteristics: DsCharacteristicValue[];
 }

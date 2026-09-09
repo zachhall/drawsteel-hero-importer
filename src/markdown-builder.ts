@@ -1,4 +1,5 @@
 import * as yaml from "js-yaml";
+import { BackgroundLinks } from "./compendium-links";
 import { DsAbility, DsAbilityDistance, DsAbilitySection, DsHero } from "./ds-hero-types";
 import { FlatFeature, FlattenResult } from "./feature-flatten";
 import { HeroStats } from "./hero-stats";
@@ -237,6 +238,28 @@ function groupFeatures(features: FlatFeature[]): { title: string; items: FlatFea
 	return groups.filter((g) => g.items.length > 0);
 }
 
+/**
+ * Abilities granted by a Kit, Domain, or Complication belong under the same
+ * action-type H3s as the class's own abilities (see renderClassFeaturesGroup)
+ * rather than getting a separate un-bucketed listing under their own ##
+ * heading — retagging their `source` to "Class:" before grouping is enough
+ * to relocate them, since `source` is only ever read for grouping (never
+ * displayed). Kit/Domain/Complication traits and other non-ability features
+ * are untouched and keep rendering under their own heading; if migrating an
+ * ability empties one of those groups entirely, groupFeatures already drops
+ * an empty group on its own.
+ */
+const ABILITY_SOURCE_PREFIXES_MIGRATED_TO_CLASS = ["Kit:", "Domain:", "Complication:"];
+
+function migrateGrantedAbilitiesToClassFeatures(features: FlatFeature[]): FlatFeature[] {
+	return features.map((f) => {
+		if (f.kind === "ability" && ABILITY_SOURCE_PREFIXES_MIGRATED_TO_CLASS.some((p) => f.source.startsWith(p))) {
+			return { ...f, source: `Class: ${f.source}` };
+		}
+		return f;
+	});
+}
+
 function renderFeature(feature: FlatFeature, resourceName: string | undefined, characteristics: Record<string, number>): string {
 	switch (feature.kind) {
 		case "ability":
@@ -309,7 +332,48 @@ function renderClassFeaturesGroup(items: FlatFeature[], resourceName: string | u
 	return parts.join("\n\n");
 }
 
-export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult): string {
+/**
+ * Culture, Career, the hero's subclass pick (e.g. a Censor's Order), Domain,
+ * and Kit often carry no ability/feature of their own to hang a ds-feature
+ * block on, so without this they'd be invisible in the Note despite being
+ * real, chosen parts of the build. Rendered as a single collapsed Obsidian
+ * callout (`- ` right after the callout type folds it closed by default) so
+ * this stays available without adding to the Note's default scroll depth —
+ * a plain heading would be foldable too, but only after the reader folds it
+ * themselves each time the Note is regenerated.
+ *
+ * `links` (see compendium-links.ts) supplies whichever DS Compendium
+ * wikilinks could be resolved against the vault's actual notes — a field
+ * renders as plain text when there's nothing to link it to.
+ */
+function buildBackgroundCallout(hero: DsHero, flat: FlattenResult, links: BackgroundLinks | undefined): string | undefined {
+	const lines: string[] = [];
+
+	if (hero.culture) {
+		lines.push(`**Culture:** ${hero.culture.name}${hero.culture.type ? ` (${hero.culture.type})` : ""}`);
+	}
+	if (hero.career) {
+		lines.push(`**Career:** ${links?.career ?? hero.career.name}`);
+	}
+	const subclassLabel = hero.class?.subclassName;
+	const selectedSubclasses = hero.class?.subclasses?.filter((s) => s.selected).map((s) => s.name) ?? [];
+	if (subclassLabel && selectedSubclasses.length) {
+		lines.push(`**${links?.subclassLabel ?? subclassLabel}:** ${selectedSubclasses.join(", ")}`);
+	}
+	if (flat.domains.length) {
+		lines.push(`**${links?.domainLabel ?? "Domain"}:** ${flat.domains.map((d) => d.name).join(", ")}`);
+	}
+	if (flat.kits.length) {
+		const kitText = flat.kits.map((kit, i) => links?.kits[i] ?? kit.name).join(", ");
+		lines.push(`**Kit:** ${kitText}`);
+	}
+
+	if (!lines.length) return undefined;
+
+	return ["> [!info]- Background", ...lines.map((l) => `> - ${l}`)].join("\n");
+}
+
+export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult, links?: BackgroundLinks): string {
 	const resourceFeature = flat.features.find((f): f is Extract<FlatFeature, { kind: "resource" }> => f.kind === "resource");
 
 	const frontmatter = yaml
@@ -352,7 +416,7 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 
 	const languagesSection = flat.languages.length ? `## Languages\n\n${flat.languages.map((l) => `- ${l}`).join("\n")}` : undefined;
 
-	const featureGroups = groupFeatures(flat.features.filter((f) => f.kind !== "resource"));
+	const featureGroups = groupFeatures(migrateGrantedAbilitiesToClassFeatures(flat.features.filter((f) => f.kind !== "resource")));
 	const featureSections = featureGroups.map((g) => {
 		const body =
 			g.title === "Class Features"
@@ -367,10 +431,13 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 
 	const notesSection = hero.state.notes ? `## Notes\n\n${hero.state.notes}` : undefined;
 
+	const backgroundCallout = buildBackgroundCallout(hero, flat, links);
+
 	const sections = [
 		`---\n${frontmatter}\n---`,
 		`# ${hero.name}`,
 		`*Level ${stats.level} ${hero.ancestry?.name ?? ""} ${hero.class?.name ?? ""}*`.trim(),
+		backgroundCallout,
 		`## Characteristics\n\n${characteristicsBlock}`,
 		`## Combat Stats\n\n${combatStatsBlock}`,
 		skillsBlock ? `## Skills\n\n${skillsBlock}` : undefined,

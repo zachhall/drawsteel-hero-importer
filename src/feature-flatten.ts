@@ -1,4 +1,4 @@
-import { DsAbility, DsBonusData, DsFeature, DsHero, DsHeroClass, DsKit } from "./ds-hero-types";
+import { DsAbility, DsBonusData, DsDomain, DsFeature, DsHero, DsHeroClass, DsKit } from "./ds-hero-types";
 
 export type FlatFeature =
 	| { kind: "text"; source: string; name: string; description: string }
@@ -18,6 +18,7 @@ export interface FlattenResult {
 	skills: string[];
 	languages: string[];
 	kits: DsKit[];
+	domains: DsDomain[];
 }
 
 /**
@@ -38,6 +39,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 		skills: [],
 		languages: [],
 		kits: [],
+		domains: [],
 	};
 
 	// A single underlying feature (e.g. a domain's level-1 feature) can be reachable
@@ -129,7 +131,8 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				return;
 
 			case "Domain":
-				(data.selected ?? []).forEach((domain: { name: string; featuresByLevel: { level: number; features: DsFeature[] }[] }) => {
+				(data.selected ?? []).forEach((domain: DsDomain) => {
+					result.domains.push(domain);
 					domain.featuresByLevel
 						.filter((fl) => fl.level <= heroLevel)
 						.forEach((fl) => fl.features.forEach((f) => visit(f, `Domain: ${domain.name}`, cls)));
