@@ -1,0 +1,9 @@
+{
+	"id": "drawsteel-hero-importer",
+	"name": "Draw Steel Hero Importer",
+	"version": "1.0.0",
+	"minAppVersion": "1.0.2",
+	"description": "Imports a ForgeSteel .ds-hero character export into a Draw Steel Elements formatted Note.",
+	"author": "hello@zhall.me",
+	"isDesktopOnly": false
+}

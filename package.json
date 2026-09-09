@@ -1,0 +1,22 @@
+{
+	"name": "drawsteel-hero-importer",
+	"version": "1.0.0",
+	"description": "Imports a ForgeSteel .ds-hero character export into a Draw Steel Elements formatted Note.",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "node esbuild.config.mjs production"
+	},
+	"license": "MIT",
+	"dependencies": {
+		"js-yaml": "^4.1.0"
+	},
+	"devDependencies": {
+		"@types/js-yaml": "^4.0.9",
+		"@types/node": "^20.0.0",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.20.0",
+		"obsidian": "^1.5.0",
+		"typescript": "^5.4.0"
+	}
+}
