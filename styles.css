@@ -131,3 +131,16 @@
 .block-language-ds-skills .skill-item {
 	break-inside: avoid;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Plugin UI (not part of a generated Note)                               */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * The hidden <input type="file"> used as the browser fallback for picking a
+ * .ds-hero file. It's appended to the DOM only so .click() opens the native
+ * picker; it's never meant to be visible.
+ */
+.dshi-hidden-file-input {
+	display: none;
+}

@@ -138,7 +138,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 			const input = document.createElement("input");
 			input.type = "file";
 			input.accept = ".ds-hero";
-			input.style.display = "none";
+			input.addClass("dshi-hidden-file-input");
 			input.addEventListener("change", () => {
 				const file = input.files?.[0];
 				input.remove();
@@ -210,7 +210,9 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) {
 			await this.archiveFileContent(existing, baseName);
-			await this.app.vault.modify(existing, content);
+			// Full regenerate-and-replace; process() runs atomically so a
+			// concurrent editor/plugin write can't interleave.
+			await this.app.vault.process(existing, () => content);
 			return existing;
 		}
 

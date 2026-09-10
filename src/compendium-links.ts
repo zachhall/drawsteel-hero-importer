@@ -18,7 +18,8 @@ export interface BackgroundLinks {
 }
 
 function findExactFile(app: App, folder: string, name: string): TFile | undefined {
-	const file = app.vault.getAbstractFileByPath(`${folder}/${name}.md`);
+	const { vault } = app;
+	const file = vault.getAbstractFileByPath(`${folder}/${name}.md`);
 	return file instanceof TFile ? file : undefined;
 }
 
@@ -31,7 +32,8 @@ function findExactFile(app: App, folder: string, name: string): TFile | undefine
  * shorter than any more specific note that happens to also contain the word.
  */
 function findConceptNoteInFolder(app: App, folder: string, keyword: string): TFile | undefined {
-	const abstractFolder = app.vault.getAbstractFileByPath(folder);
+	const { vault } = app;
+	const abstractFolder = vault.getAbstractFileByPath(folder);
 	if (!(abstractFolder instanceof TFolder)) return undefined;
 
 	const needle = keyword.toLowerCase();
@@ -70,28 +72,29 @@ function findConceptNoteInFolder(app: App, folder: string, keyword: string): TFi
  * reverse-engineered from in the Hellic test Note.
  */
 export function resolveBackgroundLinks(app: App, hero: DsHero, flat: FlattenResult, notePath: string): BackgroundLinks {
+	const { fileManager } = app;
 	const result: BackgroundLinks = { kits: [] };
 
 	if (hero.career) {
 		const file = findExactFile(app, CAREERS_FOLDER, hero.career.name);
-		if (file) result.career = app.fileManager.generateMarkdownLink(file, notePath);
+		if (file) result.career = fileManager.generateMarkdownLink(file, notePath);
 	}
 
 	result.kits = flat.kits.map((kit) => {
 		const file = findExactFile(app, KITS_FOLDER, kit.name);
-		return file ? app.fileManager.generateMarkdownLink(file, notePath) : undefined;
+		return file ? fileManager.generateMarkdownLink(file, notePath) : undefined;
 	});
 
 	const className = hero.class?.name;
 	const subclassLabel = hero.class?.subclassName;
 	if (className && subclassLabel) {
 		const file = findConceptNoteInFolder(app, `${FEATURES_ROOT}/${className}/1st-Level Features`, subclassLabel);
-		if (file) result.subclassLabel = app.fileManager.generateMarkdownLink(file, notePath, undefined, subclassLabel);
+		if (file) result.subclassLabel = fileManager.generateMarkdownLink(file, notePath, undefined, subclassLabel);
 	}
 
 	if (className && flat.domains.length) {
 		const file = findConceptNoteInFolder(app, `${FEATURES_ROOT}/${className}/1st-Level Features`, "Domain");
-		if (file) result.domainLabel = app.fileManager.generateMarkdownLink(file, notePath, undefined, "Domain");
+		if (file) result.domainLabel = fileManager.generateMarkdownLink(file, notePath, undefined, "Domain");
 	}
 
 	return result;
