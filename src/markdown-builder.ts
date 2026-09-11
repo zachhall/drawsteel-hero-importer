@@ -607,7 +607,14 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		detailsSection,
 		notesSection,
 		backgroundInfoSection,
-	].filter((s): s is string => !!s);
+	]
+		.filter((s): s is string => !!s)
+		// A section for a top-level ## heading (Background Info's nested ###
+		// groups included — the <hr> marks the end of the whole section, not
+		// each subgroup within it) gets a trailing divider so the Note reads as
+		// clearly separated blocks; the title/subtitle/Background callout above
+		// Characteristics aren't headed sections themselves, so they're left alone.
+		.map((s) => (s.startsWith("## ") ? `${s}\n\n<hr>` : s));
 
 	return sections.join("\n\n");
 }
