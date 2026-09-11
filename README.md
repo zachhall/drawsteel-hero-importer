@@ -55,4 +55,14 @@ codeblocks.
 npm install
 npm run dev    # watch build
 npm run build  # production build
+npm run lint   # eslint-plugin-obsidianmd (developer guideline checks)
+npm test       # Obsidian community-directory compliance checks (tests/)
 ```
+
+`esbuild.config.mjs` writes `main.js` into this folder, so if the repo lives in
+your vault's `.obsidian/plugins/` directory, no copy step is needed — just reload
+Obsidian.
+
+## License
+
+MIT
