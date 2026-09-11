@@ -116,12 +116,17 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		return this.pickHeroFileViaHtmlInput();
 	}
 
-	private getElectron(): ElectronLike | undefined {
+	/** Obsidian's desktop sandbox exposes a real Node `require` off `window`, not as a bare global. */
+	private getNodeRequire(): ((id: string) => unknown) | undefined {
 		try {
-			return (window as unknown as { require?: (id: string) => ElectronLike }).require?.("electron");
+			return (window as unknown as { require?: (id: string) => unknown }).require;
 		} catch {
 			return undefined;
 		}
+	}
+
+	private getElectron(): ElectronLike | undefined {
+		return this.getNodeRequire()?.("electron") as ElectronLike | undefined;
 	}
 
 	private async pickHeroFileViaElectron(dialog: ElectronDialog): Promise<DsHero | undefined> {
@@ -135,10 +140,16 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		if (result.canceled || !result.filePaths.length) return undefined;
 
 		try {
-			// Dynamic import, not a static one -- "fs/promises" doesn't exist on
-			// mobile, and this branch only ever runs behind the Electron dialog
-			// check above, which is desktop-only.
-			const { readFile } = await import("fs/promises");
+			// "fs/promises" doesn't exist on mobile, so this goes through the
+			// same window.require Node escape hatch as getElectron() above,
+			// gated by the Platform.isDesktop check at the top of this method.
+			// A bare `require("fs/promises")` and a dynamic `import("fs/promises")`
+			// both fail at runtime here: Obsidian's desktop plugin sandbox has no
+			// global `require`, and resolves import() specifiers as ES modules,
+			// which "fs/promises" isn't from its perspective.
+			const nodeRequire = this.getNodeRequire();
+			if (!nodeRequire) throw new Error("Node require() is unavailable");
+			const { readFile } = nodeRequire("fs/promises") as typeof import("fs/promises");
 			const text = await readFile(result.filePaths[0], "utf-8");
 			return this.parseHero(text);
 		} catch (err) {
