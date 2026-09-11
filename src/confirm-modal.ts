@@ -5,9 +5,9 @@ export class ConfirmModal extends Modal {
 	private readonly title: string;
 	private readonly message: string;
 	private readonly confirmText: string;
-	private readonly onConfirm: () => void;
+	private readonly onConfirm: () => void | Promise<void>;
 
-	constructor(app: App, title: string, message: string, confirmText: string, onConfirm: () => void) {
+	constructor(app: App, title: string, message: string, confirmText: string, onConfirm: () => void | Promise<void>) {
 		super(app);
 		this.title = title;
 		this.message = message;
@@ -28,7 +28,7 @@ export class ConfirmModal extends Modal {
 					.setWarning()
 					.onClick(() => {
 						this.close();
-						this.onConfirm();
+						void this.onConfirm();
 					})
 			);
 	}

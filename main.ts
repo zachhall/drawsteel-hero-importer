@@ -1,5 +1,4 @@
-import { Notice, Plugin, TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
-import { readFile } from "fs/promises";
+import { Notice, Platform, Plugin, TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
 import { ConfirmModal } from "./src/confirm-modal";
 import { resolveBackgroundLinks } from "./src/compendium-links";
 import { DsHero } from "./src/ds-hero-types";
@@ -126,6 +125,8 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	}
 
 	private async pickHeroFileViaElectron(dialog: ElectronDialog): Promise<DsHero | undefined> {
+		if (!Platform.isDesktop) return undefined;
+
 		const result = await dialog.showOpenDialog({
 			title: "Select a .ds-hero file",
 			properties: ["openFile"],
@@ -134,6 +135,10 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		if (result.canceled || !result.filePaths.length) return undefined;
 
 		try {
+			// Dynamic import, not a static one -- "fs/promises" doesn't exist on
+			// mobile, and this branch only ever runs behind the Electron dialog
+			// check above, which is desktop-only.
+			const { readFile } = await import("fs/promises");
 			const text = await readFile(result.filePaths[0], "utf-8");
 			return this.parseHero(text);
 		} catch (err) {
@@ -144,10 +149,11 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 
 	private pickHeroFileViaHtmlInput(): Promise<DsHero | undefined> {
 		return new Promise((resolve) => {
-			const input = document.createElement("input");
-			input.type = "file";
-			input.accept = ".ds-hero";
-			input.addClass("dshi-hidden-file-input");
+			const input = document.body.createEl("input", {
+				type: "file",
+				cls: "dshi-hidden-file-input",
+				attr: { accept: ".ds-hero" },
+			});
 			input.addEventListener("change", () => {
 				const file = input.files?.[0];
 				input.remove();
@@ -163,7 +169,6 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 						resolve(undefined);
 					});
 			});
-			document.body.appendChild(input);
 			input.click();
 		});
 	}
@@ -307,7 +312,8 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const saved = (await this.loadData()) as Partial<HeroImporterSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
 	}
 
 	async saveSettings() {

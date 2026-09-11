@@ -1,4 +1,23 @@
-import { DsAbility, DsBonusData, DsCharacteristicBonusData, DsDomain, DsFeature, DsHero, DsHeroClass, DsKit } from "./ds-hero-types";
+import {
+	DsAbility,
+	DsAbilityFeatureData,
+	DsBonusData,
+	DsChoiceSelectionData,
+	DsCharacteristicBonusData,
+	DsClassAbilityData,
+	DsConditionImmunityData,
+	DsDomain,
+	DsDomainSelectionData,
+	DsFeature,
+	DsHero,
+	DsHeroClass,
+	DsHeroicResourceData,
+	DsKit,
+	DsKitData,
+	DsLanguageChoiceData,
+	DsMultipleFeaturesData,
+	DsSkillChoiceData,
+} from "./ds-hero-types";
 
 export type FlatFeature =
 	| { kind: "text"; source: string; displaySource: string; name: string; description: string }
@@ -66,11 +85,15 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 			if (visitedIds.has(feature.id)) return;
 			visitedIds.add(feature.id);
 		}
+		// `feature.data`'s real shape depends entirely on `feature.type` (ForgeSteel
+		// doesn't discriminate it in the export itself), so every branch below casts
+		// through `unknown` to the shape that type actually carries.
 		const data = feature.data ?? {};
+		const dataAs = <T>() => data as unknown as T;
 
 		switch (feature.type) {
 			case "Bonus":
-				result.bonuses.push(data as DsBonusData);
+				result.bonuses.push(dataAs<DsBonusData>());
 				return;
 
 			case "Characteristic Bonus": {
@@ -80,17 +103,17 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				// Characteristic Increase class feature is exported as one of
 				// these per characteristic instead, so the running total has
 				// to be reconstructed here; see computeHeroStats.
-				const bonus = data as DsCharacteristicBonusData;
+				const bonus = dataAs<DsCharacteristicBonusData>();
 				result.characteristicBonuses[bonus.characteristic] = (result.characteristicBonuses[bonus.characteristic] ?? 0) + bonus.value;
 				return;
 			}
 
 			case "Skill Choice":
-				(data.selected ?? []).forEach((s: string) => result.skills.push(s));
+				(dataAs<DsSkillChoiceData>().selected ?? []).forEach((s) => result.skills.push(s));
 				return;
 
 			case "Language Choice":
-				(data.selected ?? []).forEach((s: string) => result.languages.push(s));
+				(dataAs<DsLanguageChoiceData>().selected ?? []).forEach((s) => result.languages.push(s));
 				return;
 
 			case "Text":
@@ -105,23 +128,27 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				}
 				return;
 
-			case "Ability":
-				if (data.ability) {
-					result.features.push({ kind: "ability", source, displaySource, ability: data.ability as DsAbility });
+			case "Ability": {
+				const ability = dataAs<DsAbilityFeatureData>().ability;
+				if (ability) {
+					result.features.push({ kind: "ability", source, displaySource, ability });
 				}
 				return;
+			}
 
-			case "Heroic Resource":
+			case "Heroic Resource": {
+				const resource = dataAs<DsHeroicResourceData>();
 				result.features.push({
 					kind: "resource",
 					source,
 					displaySource,
 					name: feature.name,
-					details: data.details ?? "",
-					currentValue: data.value ?? 0,
-					gains: data.gains ?? [],
+					details: resource.details ?? "",
+					currentValue: resource.value ?? 0,
+					gains: resource.gains ?? [],
 				});
 				return;
+			}
 
 			case "Heroic Resource Gain":
 				// Modifies an existing resource's gain rate; not surfaced as its own block in v1.
@@ -133,29 +160,29 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 					source,
 					displaySource,
 					name: feature.name,
-					conditions: data.conditions ?? [],
+					conditions: dataAs<DsConditionImmunityData>().conditions ?? [],
 				});
 				return;
 
 			case "Multiple Features":
-				(data.features ?? []).forEach((f: DsFeature) => visit(f, source, cls, displaySource));
+				(dataAs<DsMultipleFeaturesData>().features ?? []).forEach((f) => visit(f, source, cls, displaySource));
 				return;
 
 			case "Choice":
 			case "Perk":
 			case "Domain Feature":
-				(data.selected ?? []).forEach((f: DsFeature) => visit(f, source, cls, displaySource));
+				(dataAs<DsChoiceSelectionData>().selected ?? []).forEach((f) => visit(f, source, cls, displaySource));
 				return;
 
 			case "Kit":
-				(data.selected ?? []).forEach((kit: DsKit) => {
+				(dataAs<DsKitData>().selected ?? []).forEach((kit: DsKit) => {
 					result.kits.push(kit);
 					(kit.features ?? []).forEach((f: DsFeature) => visit(f, `Kit: ${kit.name}`, cls));
 				});
 				return;
 
 			case "Domain":
-				(data.selected ?? []).forEach((domain: DsDomain) => {
+				(dataAs<DsDomainSelectionData>().selected ?? []).forEach((domain) => {
 					result.domains.push(domain);
 					domain.featuresByLevel
 						.filter((fl) => fl.level <= heroLevel)
@@ -164,7 +191,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				return;
 
 			case "Class Ability": {
-				const ids: string[] = data.selectedIDs ?? [];
+				const ids = dataAs<DsClassAbilityData>().selectedIDs ?? [];
 				ids.forEach((id) => {
 					const ability = cls?.abilities.find((a) => a.id === id);
 					if (ability) {

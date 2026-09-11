@@ -7,7 +7,7 @@ codeblocks.
 
 ## Prerequisites
 
-- **Obsidian ≥ 1.0.2**
+- **Obsidian ≥ 1.6.6**
 - **[Draw Steel Elements](https://github.com/SteelCompendium/draw-steel-elements)** — required. The generated Note only renders correctly with this plugin installed and enabled, and only in Reading view (Draw Steel Elements doesn't support Live Preview).
 - **[ForgeSteel](https://forgesteel.net)** — where `.ds-hero` files come from. Not a dependency to install; unaffiliated with this plugin.
 - Optional: **[Power Roll Detector](https://github.com/zachhall/power-roll-detector)** — makes the Note's `Power Roll + N` values clickable dice rollers.

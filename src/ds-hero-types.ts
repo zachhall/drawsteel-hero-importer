@@ -9,8 +9,40 @@ export interface DsFeature {
 	name: string;
 	description: string;
 	type: string;
-	data: any;
+	data: Record<string, unknown>;
 	[key: string]: unknown;
+}
+
+/** `data` shape for a feature.type === "Ability". */
+export interface DsAbilityFeatureData {
+	ability: DsAbility;
+}
+
+/** `data` shape for a feature.type === "Heroic Resource". */
+export interface DsHeroicResourceData {
+	details: string;
+	value: number;
+	gains: { trigger: string; value: string; frequency: string }[];
+}
+
+/** `data` shape for a feature.type === "Condition Immunity". */
+export interface DsConditionImmunityData {
+	conditions: string[];
+}
+
+/** `data` shape for a feature.type === "Multiple Features". */
+export interface DsMultipleFeaturesData {
+	features: DsFeature[];
+}
+
+/** `data` shape for a feature.type of "Choice" / "Perk" / "Domain Feature". */
+export interface DsChoiceSelectionData {
+	selected: DsFeature[];
+}
+
+/** `data` shape for a feature.type === "Domain". */
+export interface DsDomainSelectionData {
+	selected: DsDomain[];
 }
 
 export interface DsBonusData {

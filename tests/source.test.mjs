@@ -3,6 +3,19 @@
 // Violations here are common review blockers even though the pages call them
 // recommendations ("depending on their severity, we may still require you to
 // address any violations").
+//
+// This repo also runs `eslint-plugin-obsidianmd` (`npm run lint`), which
+// AST-checks a lot of the same ground more precisely. Six checks that were
+// here were removed as of 2026-09 once confirmed fully subsumed and improved
+// on: no-manual-html-headings, no-default-hotkey, no-plugin-id-in-command-id,
+// no-static-styles-assignment, hardcoded-config-path, and the regex-lookbehind
+// check. Anything still here either has no ESLint equivalent (verified, not
+// assumed) or is broader/stricter than its closest ESLint rule -- e.g.
+// manifest.test.mjs's semver/URL-format/non-empty checks, this file's
+// Electron-specific and isDesktopOnly-aware Node-module check, and its
+// onunload check (also flags bare `.detach()`, not just
+// `detachLeavesOfType()`). Don't remove more without the same rule-by-rule
+// verification.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -70,39 +83,6 @@ test("no stray console.log (console.error/warn are fine)", () => {
 	assertNoMatch(/console\s*\.\s*log\s*\(/, "remove debug logging");
 });
 
-// --- Commands --------------------------------------------------------
-
-test("commands do not set a default hotkey", () => {
-	// Plugin guidelines > Avoid setting a default hotkey for commands
-	assert.ok(!/\bhotkeys\s*:/.test(allSource), "do not ship default hotkeys");
-});
-
-test("command IDs do not repeat the plugin ID", () => {
-	// submission > Don't include the plugin ID in the command ID
-	const ids = [...allSource.matchAll(/\bid\s*:\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
-	for (const id of ids) {
-		assert.ok(id !== manifest.id, `command id "${id}" duplicates the plugin id`);
-		assert.ok(
-			!id.startsWith(manifest.id + "-"),
-			`command id "${id}" is prefixed with the plugin id (Obsidian adds this)`,
-		);
-	}
-});
-
-// --- Styling --------------------------------------------------------
-
-test("no styling assigned from JavaScript", () => {
-	// Plugin guidelines > No hardcoded styling; OO self-critique > Compatibility
-	assertNoMatch(/\.style\s*\.\s*[A-Za-z-]+\s*=/, "move styling to styles.css / CSS classes");
-	assertNoMatch(/\.style\.cssText\s*=/, "move styling to styles.css / CSS classes");
-	assertNoMatch(/setAttr\(\s*["']style["']/, "move styling to styles.css / CSS classes");
-});
-
-test("no hardcoded '.obsidian' config directory", () => {
-	// OO self-critique > Compatibility: use Vault.configDir
-	assertNoMatch(/["'`]\.obsidian(\/|["'`])/, "use this.app.vault.configDir");
-});
-
 // --- Resource management -----------------------------------------------
 
 test("onunload (if present) does not detach leaves", () => {
@@ -145,11 +125,6 @@ test("mobile: no top-level Node.js / Electron imports", (t) => {
 	assertNoMatch(/\brequire\s*\(\s*["'](fs|path|os|electron|child_process)["']\s*\)/, "no static Node require() on mobile");
 });
 
-test("mobile: no regex lookbehind (breaks iOS < 16.4)", (t) => {
-	if (manifest.isDesktopOnly) return t.skip("isDesktopOnly = true");
-	assertNoMatch(/\(\?<[=!]/, "avoid lookbehind assertions for mobile compatibility");
-});
-
 test("mobile: use Obsidian's Platform, not process.platform", (t) => {
 	if (manifest.isDesktopOnly) return t.skip("isDesktopOnly = true");
 	assertNoMatch(/\bprocess\s*\.\s*platform\b/, "use the Platform API from 'obsidian'");
@@ -178,10 +153,4 @@ test("moment is imported from 'obsidian' when used", () => {
 		/import\s*\{[^}]*\bmoment\b[^}]*\}\s*from\s*["']obsidian["']/.test(allSource),
 		"import { moment } from 'obsidian' to avoid bundling a second copy",
 	);
-});
-
-test("settings headings use setHeading(), not raw <h1>/<h2>", () => {
-	// Plugin guidelines > Use setHeading instead of <h1>, <h2>
-	if (!/PluginSettingTab\b/.test(allSource)) return; // no settings tab
-	assertNoMatch(/createEl\(\s*["']h[12]["']/, "use new Setting(el).setName(...).setHeading()");
 });
