@@ -1,22 +1,25 @@
-import { DsAbility, DsBonusData, DsDomain, DsFeature, DsHero, DsHeroClass, DsKit } from "./ds-hero-types";
+import { DsAbility, DsBonusData, DsCharacteristicBonusData, DsDomain, DsFeature, DsHero, DsHeroClass, DsKit } from "./ds-hero-types";
 
 export type FlatFeature =
-	| { kind: "text"; source: string; name: string; description: string }
-	| { kind: "ability"; source: string; ability: DsAbility }
+	| { kind: "text"; source: string; displaySource: string; name: string; description: string }
+	| { kind: "ability"; source: string; displaySource: string; ability: DsAbility }
 	| {
 			kind: "resource";
 			source: string;
+			displaySource: string;
 			name: string;
 			details: string;
 			/** The hero's current banked amount of this resource (e.g. Wrath currently at 0), read directly from the hero's state — not derived. */
 			currentValue: number;
 			gains: { trigger: string; value: string; frequency: string }[];
 	  }
-	| { kind: "immunity"; source: string; name: string; conditions: string[] };
+	| { kind: "immunity"; source: string; displaySource: string; name: string; conditions: string[] };
 
 export interface FlattenResult {
 	features: FlatFeature[];
 	bonuses: DsBonusData[];
+	/** Per-characteristic totals from "Characteristic Bonus" features granted at or below the hero's level, keyed by characteristic name (e.g. "Might"). Not folded into class.characteristics by ForgeSteel — see computeHeroStats. */
+	characteristicBonuses: Record<string, number>;
 	skills: string[];
 	languages: string[];
 	kits: DsKit[];
@@ -38,6 +41,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 	const result: FlattenResult = {
 		features: [],
 		bonuses: [],
+		characteristicBonuses: {},
 		skills: [],
 		languages: [],
 		kits: [],
@@ -50,7 +54,13 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 	// same thing. Guard on id so it only gets displayed once.
 	const visitedIds = new Set<string>();
 
-	const visit = (feature: DsFeature, source: string, cls: DsHeroClass | null) => {
+	// `displaySource` normally matches `source` (both describe where a feature
+	// came from), but they diverge for a subclass's own features: `source`
+	// stays "Class: <ClassName>" so they still group under Actions/Traits
+	// alongside the base class's features, while `displaySource` names the
+	// actual doctrine/order/aspect (e.g. "Tactical Doctrine: Vanguard") so the
+	// Source line on each block stays meaningful once everything is merged.
+	const visit = (feature: DsFeature, source: string, cls: DsHeroClass | null, displaySource: string = source) => {
 		if (!feature) return;
 		if (feature.id) {
 			if (visitedIds.has(feature.id)) return;
@@ -63,9 +73,17 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				result.bonuses.push(data as DsBonusData);
 				return;
 
-			case "Characteristic Bonus":
-				// Already folded into class.characteristics by ForgeSteel.
+			case "Characteristic Bonus": {
+				// Despite the name, ForgeSteel does NOT fold this into
+				// class.characteristics — that array only ever holds the
+				// hero's starting (level-1) scores. Each level-4/7/10
+				// Characteristic Increase class feature is exported as one of
+				// these per characteristic instead, so the running total has
+				// to be reconstructed here; see computeHeroStats.
+				const bonus = data as DsCharacteristicBonusData;
+				result.characteristicBonuses[bonus.characteristic] = (result.characteristicBonuses[bonus.characteristic] ?? 0) + bonus.value;
 				return;
+			}
 
 			case "Skill Choice":
 				(data.selected ?? []).forEach((s: string) => result.skills.push(s));
@@ -80,6 +98,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 					result.features.push({
 						kind: "text",
 						source,
+						displaySource,
 						name: feature.name,
 						description: feature.description,
 					});
@@ -88,7 +107,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 
 			case "Ability":
 				if (data.ability) {
-					result.features.push({ kind: "ability", source, ability: data.ability as DsAbility });
+					result.features.push({ kind: "ability", source, displaySource, ability: data.ability as DsAbility });
 				}
 				return;
 
@@ -96,6 +115,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				result.features.push({
 					kind: "resource",
 					source,
+					displaySource,
 					name: feature.name,
 					details: data.details ?? "",
 					currentValue: data.value ?? 0,
@@ -111,19 +131,20 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				result.features.push({
 					kind: "immunity",
 					source,
+					displaySource,
 					name: feature.name,
 					conditions: data.conditions ?? [],
 				});
 				return;
 
 			case "Multiple Features":
-				(data.features ?? []).forEach((f: DsFeature) => visit(f, source, cls));
+				(data.features ?? []).forEach((f: DsFeature) => visit(f, source, cls, displaySource));
 				return;
 
 			case "Choice":
 			case "Perk":
 			case "Domain Feature":
-				(data.selected ?? []).forEach((f: DsFeature) => visit(f, source, cls));
+				(data.selected ?? []).forEach((f: DsFeature) => visit(f, source, cls, displaySource));
 				return;
 
 			case "Kit":
@@ -147,7 +168,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 				ids.forEach((id) => {
 					const ability = cls?.abilities.find((a) => a.id === id);
 					if (ability) {
-						result.features.push({ kind: "ability", source, ability });
+						result.features.push({ kind: "ability", source, displaySource, ability });
 					}
 				});
 				return;
@@ -163,6 +184,7 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 					result.features.push({
 						kind: "text",
 						source,
+						displaySource,
 						name: feature.name,
 						description: feature.description,
 					});
@@ -190,6 +212,25 @@ export function flattenHeroFeatures(hero: DsHero, heroLevel: number): FlattenRes
 		hero.class.featuresByLevel
 			.filter((fl) => fl.level <= heroLevel)
 			.forEach((fl) => fl.features.forEach((f) => visit(f, `Class: ${hero.class!.name}`, hero.class)));
+
+		// A hero's chosen subclass (e.g. a Tactician's Tactical Doctrine) has its
+		// own featuresByLevel tree, separate from hero.class.featuresByLevel —
+		// doctrine/order/domain-style features and any Characteristic Bonus they
+		// grant only exist here, not duplicated into the main class tree.
+		hero.class.subclasses
+			.filter((s) => s.selected)
+			.forEach((s) => {
+				// A "Class Ability" feature resolves by id against `cls.abilities` (see
+				// the "Class Ability" case below) — merge in the subclass's own
+				// abilities so an id referencing a doctrine-only ability still resolves.
+				const clsWithSubclassAbilities: DsHeroClass = { ...hero.class!, abilities: [...hero.class!.abilities, ...s.abilities] };
+				const subclassDisplaySource = `${hero.class!.subclassName}: ${s.name}`;
+				s.featuresByLevel
+					.filter((fl) => fl.level <= heroLevel)
+					.forEach((fl) =>
+						fl.features.forEach((f) => visit(f, `Class: ${hero.class!.name}`, clsWithSubclassAbilities, subclassDisplaySource))
+					);
+			});
 	}
 
 	if (hero.complication) {

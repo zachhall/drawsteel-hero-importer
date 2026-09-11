@@ -75,5 +75,19 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName("Clean up old Hero Notes")
+			.setDesc(
+				"Delete every archived version of a hero except the most recent one, clearing out " +
+					"the clutter repeated re-imports leave in the archive folder. Each hero's current " +
+					"Note is never touched."
+			)
+			.addButton((button) =>
+				button
+					.setButtonText("Delete old Notes")
+					.setWarning()
+					.onClick(() => this.plugin.cleanUpOldHeroNotes())
+			);
 	}
 }

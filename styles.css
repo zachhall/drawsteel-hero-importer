@@ -71,12 +71,12 @@
 /* ---------------------------------------------------------------------- */
 
 /*
- * The Note emits one ds-counter codeblock per Resources value (Wrath,
- * Surges, Victories, XP, Renown, Wealth) rather than one block holding all
- * of them — ds-counter's schema is a single value, it has no multi-entry
- * form the way ds-values-row does. Each ~~~ds-counter~~~ fence is still, at
- * the markdown level, a code block — Obsidian wraps every code block's
- * *rendered* content in a generic ".el-pre" container (confirmed via
+ * The Note emits one ds-counter codeblock per Resources value (Heroic
+ * Resource, Surges, Victories, XP, Renown, Wealth) rather than one block
+ * holding all of them — ds-counter's schema is a single value, it has no
+ * multi-entry form the way ds-values-row does. Each ~~~ds-counter~~~ fence
+ * is still, at the markdown level, a code block — Obsidian wraps every code
+ * block's *rendered* content in a generic ".el-pre" container (confirmed via
  * DevTools: ds-elements' own ".block-language-ds-counter" div sits one level
  * *inside* that, not at the top), and that outer ".el-pre" is what's actually
  * display:block, stacking consecutive counters one per line regardless of
@@ -84,6 +84,11 @@
  * also catch every *other* code block in the Note (ds-feature, etc.), so
  * ":has(> .block-language-ds-counter)" scopes it to only the ".el-pre"
  * wrappers that actually contain a counter.
+ *
+ * This rule is the fallback for a counter outside the Resources section
+ * (auto-wrap at whatever width fits). Within Resources, the ".dshi-resource-
+ * row" rule further down overrides display/width/margin so each row is a
+ * fixed, deterministic 3-column grid instead.
  */
 .el-pre:has(> .block-language-ds-counter) {
 	display: inline-flex;
@@ -98,6 +103,33 @@
 .block-language-ds-counter,
 .block-language-ds-counter .ds-counter-container {
 	width: auto;
+}
+
+/*
+ * The Resources section wraps each row of counters in its own
+ * <div class="dshi-resource-row"> (see markdown-builder.ts) specifically so
+ * this can grid-lay them — plain sibling counters share no parent but the
+ * whole Note body, so nothing shy of an explicit wrapper lets CSS treat just
+ * "this group of 3" as a row. CSS Grid (not flex-wrap) is what guarantees
+ * exactly 3 equal-width columns regardless of the note pane's width, rather
+ * than however many happen to fit before wrapping.
+ *
+ * These selectors are more specific than the ".el-pre:has(...)" rule above
+ * (two classes instead of one), so within a resource row they win on
+ * display/width/margin only — background, border, radius, padding still
+ * come from that shared rule.
+ */
+.dshi-resource-row {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 0.5em;
+	margin-bottom: 0.5em;
+}
+
+.dshi-resource-row .el-pre:has(> .block-language-ds-counter) {
+	display: block;
+	width: 100%;
+	margin: 0;
 }
 
 /* ---------------------------------------------------------------------- */

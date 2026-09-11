@@ -46,10 +46,18 @@ function modifierValue(data: DsBonusData, characteristics: DsCharacteristicValue
  * the public Draw Steel rules rather than ported from ForgeSteel's (GPL-3.0)
  * source.
  */
-export function computeHeroStats(hero: DsHero, bonuses: DsBonusData[], kits: DsKit[]): HeroStats {
+export function computeHeroStats(
+	hero: DsHero,
+	bonuses: DsBonusData[],
+	kits: DsKit[],
+	characteristicBonuses: Record<string, number> = {}
+): HeroStats {
 	const level = hero.class?.level ?? 1;
 	const characteristics: Record<string, number> = {};
 	(hero.class?.characteristics ?? []).forEach((c) => (characteristics[c.characteristic] = c.value));
+	Object.entries(characteristicBonuses).forEach(([name, value]) => {
+		characteristics[name] = (characteristics[name] ?? 0) + value;
+	});
 
 	const sumField = (field: string): number =>
 		bonuses

@@ -127,13 +127,13 @@ function mapSections(sections: DsAbilitySection[], characteristics: Record<strin
 			};
 		}
 		if (s.type === "text" && s.text) {
-			return { effect: s.text };
+			return { effect: resolveTierText(s.text.trim(), characteristics) };
 		}
 		if (s.type === "field") {
 			return {
 				name: s.name,
 				cost: s.value !== undefined ? String(s.value) : undefined,
-				effect: s.effect,
+				effect: resolveTierText(s.effect?.trim(), characteristics),
 			};
 		}
 		// 'package' sections reference the sourcebook compendium and can't be
@@ -154,10 +154,38 @@ function costDisplay(ability: DsAbility, resourceName: string | undefined): { co
 	return {};
 }
 
+/**
+ * Appended as the last two `effects` entries on every ds-feature block, so
+ * that once Abilities/Traits from many sources (Class, Subclass, Ancestry,
+ * Kit, etc.) are merged together under one heading (## Actions, ## Traits),
+ * each block still says where it came from — rendered as e.g.
+ * "**Source:** *Kit — Rapid Fire*". ds-feature has no dedicated "source"
+ * field, and its `metadata` property isn't rendered by the
+ * draw-steel-elements plugin at all (it only reproduces the object as
+ * frontmatter when a block is exported to its own note), so it can't be
+ * used for this — an effect entry (the "Source" name still gets the
+ * plugin's normal bold-key treatment, same as "Trigger:" or a "Spend" cost)
+ * is the only field that actually renders.
+ *
+ * A leading "---" divider entry is included because the plugin's own
+ * effect-to-effect spacing is otherwise too tight to read the Source line as
+ * clearly separate from the ability's actual effect text — an hr renders as
+ * its own block with real margin, which nothing in the YAML data alone
+ * (e.g. blank lines inside the effect string) reliably achieves.
+ */
+function sourceEffects(displaySource: string): Record<string, unknown>[] {
+	// displaySource is built elsewhere as "<Prefix>: <Name>" (e.g. "Kit:
+	// Rapid Fire") for grouping purposes — swap that for an em dash here
+	// purely for display, per the requested "Class — Tactician" style.
+	const formatted = displaySource.replace(": ", " — ");
+	return [{ effect: "---" }, { name: "Source", effect: `*${formatted}*` }];
+}
+
 function abilityToFeatureBlock(
 	ability: DsAbility,
 	resourceName: string | undefined,
-	characteristics: Record<string, number>
+	characteristics: Record<string, number>,
+	displaySource: string
 ): Record<string, unknown> {
 	const { cost, ability_type } = costDisplay(ability, resourceName);
 	return {
@@ -166,22 +194,22 @@ function abilityToFeatureBlock(
 		name: ability.name,
 		ability_type,
 		cost,
-		flavor: ability.description || undefined,
+		flavor: ability.description?.trim() || undefined,
 		keywords: ability.keywords?.length ? ability.keywords : undefined,
 		usage: ability.type.usage,
 		distance: formatDistance(ability.distance),
 		target: ability.target || undefined,
 		trigger: ability.type.trigger || undefined,
-		effects: mapSections(ability.sections, characteristics),
+		effects: [...mapSections(ability.sections, characteristics), ...sourceEffects(displaySource)],
 	};
 }
 
-function textToFeatureBlock(name: string, description: string): Record<string, unknown> {
+function textToFeatureBlock(name: string, description: string, displaySource: string): Record<string, unknown> {
 	return {
 		type: "feature",
 		feature_type: "trait",
 		name,
-		effects: [{ effect: description }],
+		effects: [{ effect: description.trim() }, ...sourceEffects(displaySource)],
 	};
 }
 
@@ -242,17 +270,35 @@ function groupFeatures(features: FlatFeature[]): { title: string; items: FlatFea
 }
 
 /**
- * Abilities granted by a Kit, Domain, or Complication belong under the same
- * action-type H3s as the class's own abilities (see renderActionsGroup)
- * rather than getting a separate un-bucketed listing under their own ##
- * heading — retagging their `source` to "Class:" before grouping is enough
- * to relocate them, since `source` is only ever read for grouping (never
- * displayed). Kit/Domain/Complication traits and other non-ability features
- * are untouched and keep rendering under their own heading; if migrating an
- * ability empties one of those groups entirely, groupFeatures already drops
- * an empty group on its own.
+ * Pulls "trait" (kind: "text") features out of the Actions group and into
+ * their own list, mutating the group's items in place — the Actions section
+ * is meant to hold only the class's Abilities (see renderActionsGroup); its
+ * trait features (perks, "Master of Arms"-style passive upgrades, etc.) get
+ * their own top-level "## Traits" section instead, between Actions and
+ * Details. Non-trait, non-ability items (e.g. an immunity line) stay put.
  */
-const ABILITY_SOURCE_PREFIXES_MIGRATED_TO_CLASS = ["Kit:", "Domain:", "Complication:"];
+function extractActionsTraits(groups: { title: string; items: FlatFeature[] }[]): FlatFeature[] {
+	const actionsGroup = groups.find((g) => g.title === "Actions");
+	if (!actionsGroup) return [];
+
+	const traits = actionsGroup.items.filter((f) => f.kind === "text");
+	actionsGroup.items = actionsGroup.items.filter((f) => f.kind !== "text");
+	return traits;
+}
+
+/**
+ * Abilities granted by an Ancestry, Career, Kit, Domain, or Complication
+ * belong under the same action-type H3s as the class's own abilities (see
+ * renderActionsGroup) rather than getting a separate un-bucketed listing
+ * under their own heading — retagging their `source` to "Class:" before
+ * grouping is enough to relocate them, since `source` is only ever read for
+ * grouping (never displayed). Traits and other non-ability features from
+ * these sources are untouched and keep rendering under their own heading
+ * (Ancestry/Career under Background Info, Kit/Domain/Complication under
+ * their own top-level heading); if migrating an ability empties one of those
+ * groups entirely, groupFeatures already drops an empty group on its own.
+ */
+const ABILITY_SOURCE_PREFIXES_MIGRATED_TO_CLASS = ["Ancestry:", "Career:", "Kit:", "Domain:", "Complication:"];
 
 function migrateGrantedAbilitiesToActions(features: FlatFeature[]): FlatFeature[] {
 	return features.map((f) => {
@@ -271,9 +317,9 @@ function renderFeature(
 ): string {
 	switch (feature.kind) {
 		case "ability":
-			return dsBlock("ds-feature", abilityToFeatureBlock(feature.ability, resourceName, characteristics));
+			return dsBlock("ds-feature", abilityToFeatureBlock(feature.ability, resourceName, characteristics, feature.displaySource));
 		case "text":
-			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description));
+			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description, feature.displaySource));
 		case "resource": {
 			const lines = [`${headingLevel} ${feature.name}`];
 			if (feature.details) lines.push(feature.details);
@@ -307,13 +353,32 @@ const ABILITY_USAGE_GROUPS: { title: string; match: (usage: string) => boolean }
 ];
 
 /**
+ * Orders abilities within one action-type bucket: Signature Abilities first,
+ * then zero-cost abilities (e.g. Barerhit's "Strike Now!", which costs
+ * nothing — distinct from a signature ability), then everything else by
+ * ascending Heroic Resource cost (a 3-cost ability before a 7-cost one),
+ * whatever that class's Heroic Resource happens to be named (Focus, Wrath,
+ * etc. — cost is a plain number on DsAbility, unrelated to the resource's
+ * display name). A non-numeric, non-"signature" cost (unseen in practice)
+ * sorts to the end of its tier rather than crashing the sort.
+ */
+function abilitySortKey(f: Extract<FlatFeature, { kind: "ability" }>): [number, number] {
+	const cost = f.ability.cost;
+	if (cost === "signature") return [0, 0];
+	if (typeof cost === "number" && cost <= 0) return [1, 0];
+	const numericCost = typeof cost === "number" ? cost : Number(cost);
+	return [2, Number.isFinite(numericCost) ? numericCost : Infinity];
+}
+
+/**
  * Renders the Actions group (the class's own abilities plus any migrated in
  * from a Kit/Domain/Complication — see migrateGrantedAbilitiesToActions):
- * non-ability features (traits, etc.) are listed as-is, and Ability features
- * are split out under H3 action-type headings (Main Action / Maneuver / Move
- * Action / Triggered Action, plus an "Other" catch-all for any usage string
- * that doesn't match one of those, e.g. a future ForgeSteel usage value this
- * list hasn't seen yet).
+ * trait features are pulled out to the Note's own "## Traits" section (see
+ * extractActionsTraits) before this runs, so only Ability features (split out
+ * under H3 action-type headings — Main Action / Maneuver / Move Action /
+ * Triggered Action, plus an "Other" catch-all for any usage string that
+ * doesn't match one of those, each ordered by abilitySortKey) and any other
+ * non-ability, non-trait feature (e.g. an immunity line) land here.
  */
 function renderActionsGroup(items: FlatFeature[], resourceName: string | undefined, characteristics: Record<string, number>): string {
 	const abilities = items.filter((f): f is Extract<FlatFeature, { kind: "ability" }> => f.kind === "ability");
@@ -332,6 +397,12 @@ function renderActionsGroup(items: FlatFeature[], resourceName: string | undefin
 		}
 	});
 	if (otherAbilities.length) buckets.push({ title: "Other", items: otherAbilities });
+
+	buckets.forEach((b) => b.items.sort((a, c) => {
+		const [aTier, aValue] = abilitySortKey(a);
+		const [cTier, cValue] = abilitySortKey(c);
+		return aTier - cTier || aValue - cValue;
+	}));
 
 	buckets
 		.filter((b) => b.items.length > 0)
@@ -439,8 +510,7 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 	// Heroic Resource feature's own current value for the first entry), not
 	// derived from Bonus features the way Statistics below is. Each is its
 	// own ds-counter (rather than one ds-values-row) so the player can click
-	// +/- to track them during play; styles.css lays consecutive counters out
-	// in a single row.
+	// +/- to track them during play.
 	const resourceEntries: [string, number][] = [];
 	if (resourceFeature) resourceEntries.push([resourceFeature.name, resourceFeature.currentValue]);
 	resourceEntries.push(
@@ -450,8 +520,23 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		["Renown", hero.state.renown ?? 0],
 		["Wealth", hero.state.wealth ?? 0]
 	);
-	const resourcesBlock = resourceEntries
-		.map(([name, value]) => dsBlock("ds-counter", { name, current_value: value, min_value: 0 }))
+
+	// Grouped 3-per-row (rather than left to wrap naturally at whatever width
+	// the note pane happens to be) so the row always reads Heroic
+	// Resource/Surges/Victories, then XP/Renown/Wealth. Each row needs its own
+	// dedicated parent to CSS-grid against — the counters otherwise share no
+	// container but the whole Note body, so styles.css can't grid-lay them out
+	// 3-wide without this wrapper; see the ds-counter section there.
+	const RESOURCE_ROW_SIZE = 3;
+	const resourceRows: [string, number][][] = [];
+	for (let i = 0; i < resourceEntries.length; i += RESOURCE_ROW_SIZE) {
+		resourceRows.push(resourceEntries.slice(i, i + RESOURCE_ROW_SIZE));
+	}
+	const resourcesBlock = resourceRows
+		.map((row) => {
+			const counters = row.map(([name, value]) => dsBlock("ds-counter", { name, current_value: value, min_value: 0 })).join("\n\n");
+			return `<div class="dshi-resource-row">\n\n${counters}\n\n</div>`;
+		})
 		.join("\n\n");
 
 	const statisticsBlock = dsBlock("ds-values-row", {
@@ -468,12 +553,15 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 
 	const nonResourceFeatures = migrateGrantedAbilitiesToActions(flat.features.filter((f) => f.kind !== "resource"));
 	const featureGroups = groupFeatures(nonResourceFeatures);
+	const traitItems = extractActionsTraits(featureGroups);
 
 	// Ancestry/Career/Domain/Complication are rarely referenced during play —
 	// bundled into one "Background Info" section (as H3s) at the very end of
 	// the Note instead of each getting its own top-level heading in the
 	// middle, so folding that one heading collapses all of them together.
-	const mainGroups = featureGroups.filter((g) => !BACKGROUND_INFO_GROUP_TITLES.has(g.title));
+	// The Actions group can end up empty here if extractActionsTraits pulled
+	// out its only items (an all-trait class with no abilities yet).
+	const mainGroups = featureGroups.filter((g) => !BACKGROUND_INFO_GROUP_TITLES.has(g.title) && g.items.length > 0);
 	const backgroundInfoGroups = featureGroups.filter((g) => BACKGROUND_INFO_GROUP_TITLES.has(g.title));
 
 	const renderGroupBody = (g: { title: string; items: FlatFeature[] }) =>
@@ -482,6 +570,10 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 			: g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n");
 
 	const featureSections = mainGroups.map((g) => `## ${g.title}\n\n${renderGroupBody(g)}`);
+
+	const traitsSection = traitItems.length
+		? `## Traits\n\n${traitItems.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n")}`
+		: undefined;
 
 	const backgroundInfoSection = backgroundInfoGroups.length
 		? `## Background Info\n\n${backgroundInfoGroups.map((g) => `### ${g.title}\n\n${renderGroupBody(g)}`).join("\n\n")}`
@@ -511,6 +603,7 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		`## Statistics\n\n${statisticsBlock}`,
 		skillsBlock ? `## Skills\n\n${skillsBlock}` : undefined,
 		...featureSections,
+		traitsSection,
 		detailsSection,
 		notesSection,
 		backgroundInfoSection,

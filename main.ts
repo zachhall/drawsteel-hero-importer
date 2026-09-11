@@ -1,5 +1,6 @@
-import { Notice, Plugin, TAbstractFile, TFile, normalizePath } from "obsidian";
+import { Notice, Plugin, TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
 import { readFile } from "fs/promises";
+import { ConfirmModal } from "./src/confirm-modal";
 import { resolveBackgroundLinks } from "./src/compendium-links";
 import { DsHero } from "./src/ds-hero-types";
 import { extractDsCounterValues, FRONTMATTER_SYNCED_COUNTERS } from "./src/frontmatter-sync";
@@ -18,6 +19,14 @@ function formatTimestampForFilename(date: Date): string {
 	const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 	const timePart = `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
 	return `${datePart} ${timePart}`;
+}
+
+/** Matches exactly the "<baseName> - <timestamp>[ (n)].md" shape archiveFileContent produces. */
+const ARCHIVED_NOTE_NAME = /^(.*) - \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}-\d{3}(?: \(\d+\))?$/;
+
+/** The hero name encoded in an archived Note's basename, or undefined for a file this plugin didn't create (left alone by cleanup). */
+function parseArchivedHeroName(basename: string): string | undefined {
+	return ARCHIVED_NOTE_NAME.exec(basename)?.[1];
 }
 
 /** The tiny slice of Electron's renderer API this plugin actually calls. */
@@ -83,7 +92,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 
 		const heroLevel = hero.class?.level ?? 1;
 		const flat = flattenHeroFeatures(hero, heroLevel);
-		const stats = computeHeroStats(hero, flat.bonuses, flat.kits);
+		const stats = computeHeroStats(hero, flat.bonuses, flat.kits, flat.characteristicBonuses);
 		const notePath = this.computeNotePath(hero.name);
 		const links = resolveBackgroundLinks(this.app, hero, flat, notePath);
 		const content = buildHeroNote(hero, stats, flat, links);
@@ -237,6 +246,64 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 
 		const oldContent = await this.app.vault.read(file);
 		await this.app.vault.create(archivePath, oldContent);
+	}
+
+	/**
+	 * Deletes every archived Hero Note except the most recently modified one
+	 * per hero — the current Note (outside the archive folder) is never
+	 * touched. Goes through FileManager.trashFile rather than Vault.delete
+	 * per Obsidian's plugin guidelines, so this still respects the user's own
+	 * "Deleted files" vault setting (system trash, .trash folder, or
+	 * permanent) instead of forcing permanent deletion unconditionally —
+	 * the confirmation warns accordingly rather than overpromising "undoable".
+	 */
+	async cleanUpOldHeroNotes() {
+		const staleFiles = this.findStaleArchivedNotes();
+		if (!staleFiles.length) {
+			new Notice("No old Hero Notes to clean up — every archived hero already has only its most recent version.");
+			return;
+		}
+
+		const count = staleFiles.length;
+		new ConfirmModal(
+			this.app,
+			"Delete old Hero Notes?",
+			`This will delete ${count} archived Hero Note${count === 1 ? "" : "s"}, keeping only the most recent ` +
+				"archived version of each hero. Where they end up depends on your vault's \"Deleted files\" setting " +
+				"(Settings → Files and links) — if that's set to permanently delete, this cannot be undone.",
+			"Delete old Notes",
+			async () => {
+				for (const file of staleFiles) {
+					await this.app.fileManager.trashFile(file);
+				}
+				new Notice(`Deleted ${count} old Hero Note${count === 1 ? "" : "s"}.`);
+			}
+		).open();
+	}
+
+	/** Every archived Hero Note except the most recently modified one per hero, grouped by the name parseArchivedHeroName recovers from the filename. */
+	private findStaleArchivedNotes(): TFile[] {
+		const archiveFolder = normalizePath(this.settings.archiveFolder || DEFAULT_SETTINGS.archiveFolder);
+		const folder = this.app.vault.getAbstractFileByPath(archiveFolder);
+		if (!(folder instanceof TFolder)) return [];
+
+		const byHero = new Map<string, TFile[]>();
+		for (const file of folder.children) {
+			if (!(file instanceof TFile) || file.extension !== "md") continue;
+			const heroName = parseArchivedHeroName(file.basename);
+			if (!heroName) continue;
+			const group = byHero.get(heroName);
+			if (group) group.push(file);
+			else byHero.set(heroName, [file]);
+		}
+
+		const stale: TFile[] = [];
+		for (const group of byHero.values()) {
+			if (group.length <= 1) continue;
+			group.sort((a, b) => b.stat.mtime - a.stat.mtime);
+			stale.push(...group.slice(1));
+		}
+		return stale;
 	}
 
 	async loadSettings() {
