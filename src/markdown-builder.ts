@@ -1,89 +1,21 @@
-import * as yaml from "js-yaml";
 import { BackgroundLinks } from "./compendium-links";
 import { DsAbility, DsAbilityDistance, DsAbilitySection, DsHero } from "./ds-hero-types";
 import { FlatFeature, FlattenResult } from "./feature-flatten";
 import { HeroStats } from "./hero-stats";
-import { findKnownUnsupportedSkillGroup, findOfficialSkill } from "./skill-data";
-
-const FENCE = "~~~";
-
-const CHARACTERISTIC_SHORTHAND: Record<string, string> = {
-	M: "Might",
-	A: "Agility",
-	R: "Reason",
-	I: "Intuition",
-	P: "Presence",
-};
-
-/**
- * Tier text (e.g. "5 + P psychic damage") uses single-letter characteristic
- * shorthand for the hero's own bonus damage — only ever appearing right after
- * a "+", sometimes as a choice like "M or A damage" (use whichever is
- * higher). Elsewhere in the same string a letter can appear as part of a
- * potency check instead (e.g. "P < [weak]", meaning "the target resists
- * unless their Presence is less than your weak potency value") — that's left
- * untouched by only matching the "+ <letter>" addition shape; see
- * resolvePotencyThresholds for the "[weak]"/etc. half of that.
- *
- * Per the user's explicit request: substitute the shorthand with the hero's
- * actual characteristic value, but don't fold it into the base damage number
- * — keep them as separate addends so the player can still see how much of
- * the total came from their characteristic.
- */
-function resolveDamageBonusShorthand(text: string | undefined, characteristics: Record<string, number>): string | undefined {
-	if (!text) return text;
-	return text.replace(/\+ ([MARIP])(?:\s+or\s+([MARIP]))?(?=[^a-zA-Z]|$)/g, (match, c1: string, c2?: string) => {
-		const value1 = characteristics[CHARACTERISTIC_SHORTHAND[c1]] ?? 0;
-		if (!c2) return `+ ${value1}`;
-		const value2 = characteristics[CHARACTERISTIC_SHORTHAND[c2]] ?? 0;
-		return `+ ${Math.max(value1, value2)}`;
-	});
-}
-
-/**
- * "[weak]"/"[average]"/"[strong]" placeholders (e.g. "I < [weak]") stand for
- * the hero's potency values, per the Draw Steel rules: weak = highest
- * characteristic score − 2, average = highest − 1, strong = highest —
- * always based on the hero's single highest characteristic, regardless of
- * which characteristic the target resists with. Once resolved to numbers a
- * player can read the check directly (e.g. "I < 0") without doing the math
- * at the table.
- */
-function resolvePotencyThresholds(text: string | undefined, characteristics: Record<string, number>): string | undefined {
-	if (!text) return text;
-	const highest = Math.max(...Object.values(characteristics), 0);
-	const POTENCY_VALUES: Record<string, number> = {
-		weak: highest - 2,
-		average: highest - 1,
-		strong: highest,
-	};
-	return text.replace(/\[(weak|average|strong)\]/gi, (match, tier: string) => String(POTENCY_VALUES[tier.toLowerCase()]));
-}
-
-function resolveTierText(text: string | undefined, characteristics: Record<string, number>): string | undefined {
-	return resolvePotencyThresholds(resolveDamageBonusShorthand(text, characteristics), characteristics);
-}
-
-function dsBlock(language: string, body: Record<string, unknown>): string {
-	const clean = stripUndefined(body);
-	const dump = yaml.dump(clean, { lineWidth: -1, noRefs: true }).trimEnd();
-	return `${FENCE}${language}\n${dump}\n${FENCE}`;
-}
-
-function stripUndefined<T>(value: T): T {
-	if (Array.isArray(value)) {
-		return value.map(stripUndefined) as unknown as T;
-	}
-	if (value && typeof value === "object") {
-		const out: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-			if (v === undefined) continue;
-			out[k] = stripUndefined(v);
-		}
-		return out as T;
-	}
-	return value;
-}
+import { dsBlock, resolveTierText } from "./note-block-helpers";
+import {
+	abilityToFeatureBlock,
+	buildBackgroundCallout as renderBackgroundCallout,
+	buildCharacteristicsBlock,
+	buildFrontmatter,
+	buildResourcesBlock,
+	buildSkillsBlock,
+	buildStatisticsBlock,
+	buildVitalsBlock,
+	NoteAbility,
+	renderActionsGroup,
+	sourceEffects,
+} from "./note-model";
 
 function formatDistance(distances: DsAbilityDistance[]): string | undefined {
 	if (!distances?.length) return undefined;
@@ -144,63 +76,21 @@ function mapSections(sections: DsAbilitySection[], characteristics: Record<strin
 	return mapped.filter((x): x is Record<string, unknown> => !!x);
 }
 
-function costDisplay(ability: DsAbility, resourceName: string | undefined): { cost?: string; ability_type?: string } {
-	if (ability.cost === "signature") {
-		return { ability_type: "Signature Ability" };
-	}
-	if (typeof ability.cost === "number" && ability.cost > 0) {
-		return { cost: resourceName ? `${ability.cost} ${resourceName}` : String(ability.cost) };
-	}
-	return {};
-}
-
-/**
- * Appended as the last two `effects` entries on every ds-feature block, so
- * that once Abilities/Traits from many sources (Class, Subclass, Ancestry,
- * Kit, etc.) are merged together under one heading (## Actions, ## Traits),
- * each block still says where it came from — rendered as e.g.
- * "**Source:** *Kit — Rapid Fire*". ds-feature has no dedicated "source"
- * field, and its `metadata` property isn't rendered by the
- * draw-steel-elements plugin at all (it only reproduces the object as
- * frontmatter when a block is exported to its own note), so it can't be
- * used for this — an effect entry (the "Source" name still gets the
- * plugin's normal bold-key treatment, same as "Trigger:" or a "Spend" cost)
- * is the only field that actually renders.
- *
- * A leading "---" divider entry is included because the plugin's own
- * effect-to-effect spacing is otherwise too tight to read the Source line as
- * clearly separate from the ability's actual effect text — an hr renders as
- * its own block with real margin, which nothing in the YAML data alone
- * (e.g. blank lines inside the effect string) reliably achieves.
- */
-function sourceEffects(displaySource: string): Record<string, unknown>[] {
-	// displaySource is built elsewhere as "<Prefix>: <Name>" (e.g. "Kit:
-	// Rapid Fire") for grouping purposes — swap that for an em dash here
-	// purely for display, per the requested "Class — Tactician" style.
-	const formatted = displaySource.replace(": ", " — ");
-	return [{ effect: "---" }, { name: "Source", effect: `*${formatted}*` }];
-}
-
-function abilityToFeatureBlock(
-	ability: DsAbility,
-	resourceName: string | undefined,
-	characteristics: Record<string, number>,
-	displaySource: string
-): Record<string, unknown> {
-	const { cost, ability_type } = costDisplay(ability, resourceName);
+/** Maps a ForgeSteel DsAbility into the shared NoteAbility shape (see note-model.ts) — this is the one place resolveTierText's shorthand-resolution runs (via mapSections) for the ForgeSteel path, since a PDF-sourced ability's text is already fully resolved on the sheet. */
+function toNoteAbility(ability: DsAbility, resourceName: string | undefined, characteristics: Record<string, number>, displaySource: string): NoteAbility {
 	return {
-		type: "feature",
-		feature_type: "ability",
 		name: ability.name,
-		ability_type,
-		cost,
+		isSignature: ability.cost === "signature",
+		cost: typeof ability.cost === "number" ? ability.cost : undefined,
+		resourceName,
+		keywords: ability.keywords,
 		flavor: ability.description?.trim() || undefined,
-		keywords: ability.keywords?.length ? ability.keywords : undefined,
 		usage: ability.type.usage,
 		distance: formatDistance(ability.distance),
 		target: ability.target || undefined,
 		trigger: ability.type.trigger || undefined,
-		effects: [...mapSections(ability.sections, characteristics), ...sourceEffects(displaySource)],
+		effects: mapSections(ability.sections, characteristics),
+		displaySource,
 	};
 }
 
@@ -210,31 +100,6 @@ function textToFeatureBlock(name: string, description: string, displaySource: st
 		feature_type: "trait",
 		name,
 		effects: [{ effect: description.trim() }, ...sourceEffects(displaySource)],
-	};
-}
-
-/**
- * The ds-skills element's `skills` field only accepts official skill names —
- * it errors on anything else. A skill a hero picked during character
- * creation that ISN'T in the official list (e.g. one the player typed in
- * themselves) has to go in `custom_skills` instead, with its own name/group.
- */
-function buildSkillsYaml(skillNames: string[]): Record<string, unknown> {
-	const official: string[] = [];
-	const custom: { name: string; has_skill: true; skill_group?: string }[] = [];
-
-	skillNames.forEach((name) => {
-		const match = findOfficialSkill(name);
-		if (match) {
-			official.push(match.name);
-		} else {
-			custom.push({ name, has_skill: true, skill_group: findKnownUnsupportedSkillGroup(name) });
-		}
-	});
-
-	return {
-		skills: official.length ? official : undefined,
-		custom_skills: custom.length ? custom : undefined,
 	};
 }
 
@@ -317,7 +182,7 @@ function renderFeature(
 ): string {
 	switch (feature.kind) {
 		case "ability":
-			return dsBlock("ds-feature", abilityToFeatureBlock(feature.ability, resourceName, characteristics, feature.displaySource));
+			return dsBlock("ds-feature", abilityToFeatureBlock(toNoteAbility(feature.ability, resourceName, characteristics, feature.displaySource)));
 		case "text":
 			return dsBlock("ds-feature", textToFeatureBlock(feature.name, feature.description, feature.displaySource));
 		case "resource": {
@@ -332,85 +197,24 @@ function renderFeature(
 }
 
 /**
- * Action-type buckets Class Feature abilities are organized under, in this
- * fixed order. Each is an H3 — Obsidian folds any heading by default, so
- * these are collapsible without any extra callout syntax. A bucket with no
- * matching abilities on a given hero is dropped entirely (see
- * renderClassFeaturesGroup) rather than rendered empty.
- *
- * "Move" here covers the rulebook's Move action type (e.g. the null's
- * level-5 ability Phase Leap, confirmed via drawsteel-assistant — no example
- * of this usage exists in the Hellic test fixture) — matched loosely as
- * "Move"/"Movement" since ForgeSteel data isn't necessarily consistent about
- * which spelling it exports, even though the heading itself reads "Move
- * Action" to match the style of the other three.
+ * Splits an Actions group's items (the class's own abilities plus any
+ * migrated in from a Kit/Domain/Complication — see
+ * migrateGrantedAbilitiesToActions) into NoteAbility[] plus any other,
+ * already-rendered non-ability feature (e.g. an immunity line) — trait
+ * features are pulled out to the Note's own "## Traits" section (see
+ * extractActionsTraits) before this runs. The actual bucketing/sorting/
+ * rendering (Main Action/Maneuver/Move Action/Triggered Action/Other, each
+ * ordered signature-first-then-ascending-cost) is shared with the PDF
+ * import path — see renderActionsGroup in note-model.ts.
  */
-const ABILITY_USAGE_GROUPS: { title: string; match: (usage: string) => boolean }[] = [
-	{ title: "Main Action", match: (u) => /main action/i.test(u) },
-	{ title: "Maneuver", match: (u) => /maneuver/i.test(u) },
-	{ title: "Move Action", match: (u) => /^move(ment)?( action)?$/i.test(u.trim()) },
-	{ title: "Triggered Action", match: (u) => /triggered action/i.test(u) },
-];
-
-/**
- * Orders abilities within one action-type bucket: Signature Abilities first,
- * then zero-cost abilities (e.g. Barerhit's "Strike Now!", which costs
- * nothing — distinct from a signature ability), then everything else by
- * ascending Heroic Resource cost (a 3-cost ability before a 7-cost one),
- * whatever that class's Heroic Resource happens to be named (Focus, Wrath,
- * etc. — cost is a plain number on DsAbility, unrelated to the resource's
- * display name). A non-numeric, non-"signature" cost (unseen in practice)
- * sorts to the end of its tier rather than crashing the sort.
- */
-function abilitySortKey(f: Extract<FlatFeature, { kind: "ability" }>): [number, number] {
-	const cost = f.ability.cost;
-	if (cost === "signature") return [0, 0];
-	if (typeof cost === "number" && cost <= 0) return [1, 0];
-	const numericCost = typeof cost === "number" ? cost : Number(cost);
-	return [2, Number.isFinite(numericCost) ? numericCost : Infinity];
-}
-
-/**
- * Renders the Actions group (the class's own abilities plus any migrated in
- * from a Kit/Domain/Complication — see migrateGrantedAbilitiesToActions):
- * trait features are pulled out to the Note's own "## Traits" section (see
- * extractActionsTraits) before this runs, so only Ability features (split out
- * under H3 action-type headings — Main Action / Maneuver / Move Action /
- * Triggered Action, plus an "Other" catch-all for any usage string that
- * doesn't match one of those, each ordered by abilitySortKey) and any other
- * non-ability, non-trait feature (e.g. an immunity line) land here.
- */
-function renderActionsGroup(items: FlatFeature[], resourceName: string | undefined, characteristics: Record<string, number>): string {
-	const abilities = items.filter((f): f is Extract<FlatFeature, { kind: "ability" }> => f.kind === "ability");
+function renderActionsSection(items: FlatFeature[], resourceName: string | undefined, characteristics: Record<string, number>): string {
+	const abilityFeatures = items.filter((f): f is Extract<FlatFeature, { kind: "ability" }> => f.kind === "ability");
 	const others = items.filter((f) => f.kind !== "ability");
 
-	const parts: string[] = others.map((f) => renderFeature(f, resourceName, characteristics));
+	const abilities = abilityFeatures.map((f) => toNoteAbility(f.ability, resourceName, characteristics, f.displaySource));
+	const otherRendered = others.map((f) => renderFeature(f, resourceName, characteristics));
 
-	const buckets = ABILITY_USAGE_GROUPS.map((g) => ({ title: g.title, items: [] as typeof abilities }));
-	const otherAbilities: typeof abilities = [];
-	abilities.forEach((f) => {
-		const bucket = ABILITY_USAGE_GROUPS.find((g) => g.match(f.ability.type.usage));
-		if (bucket) {
-			buckets.find((b) => b.title === bucket.title)!.items.push(f);
-		} else {
-			otherAbilities.push(f);
-		}
-	});
-	if (otherAbilities.length) buckets.push({ title: "Other", items: otherAbilities });
-
-	buckets.forEach((b) => b.items.sort((a, c) => {
-		const [aTier, aValue] = abilitySortKey(a);
-		const [cTier, cValue] = abilitySortKey(c);
-		return aTier - cTier || aValue - cValue;
-	}));
-
-	buckets
-		.filter((b) => b.items.length > 0)
-		.forEach((b) => {
-			parts.push(`### ${b.title}\n\n${b.items.map((f) => renderFeature(f, resourceName, characteristics)).join("\n\n")}`);
-		});
-
-	return parts.join("\n\n");
+	return renderActionsGroup(abilities, otherRendered);
 }
 
 /**
@@ -428,81 +232,61 @@ function renderActionsGroup(items: FlatFeature[], resourceName: string | undefin
  * renders as plain text when there's nothing to link it to.
  */
 function buildBackgroundCallout(hero: DsHero, flat: FlattenResult, links: BackgroundLinks | undefined): string | undefined {
-	const lines: string[] = [];
+	const lines: { label: string; value: string }[] = [];
 
 	if (hero.culture) {
-		lines.push(`**Culture:** ${hero.culture.name}${hero.culture.type ? ` (${hero.culture.type})` : ""}`);
+		lines.push({ label: "Culture", value: `${hero.culture.name}${hero.culture.type ? ` (${hero.culture.type})` : ""}` });
 	}
 	if (hero.career) {
-		lines.push(`**Career:** ${links?.career ?? hero.career.name}`);
+		lines.push({ label: "Career", value: links?.career ?? hero.career.name });
 	}
 	const subclassLabel = hero.class?.subclassName;
 	const selectedSubclasses = hero.class?.subclasses?.filter((s) => s.selected).map((s) => s.name) ?? [];
 	if (subclassLabel && selectedSubclasses.length) {
-		lines.push(`**${links?.subclassLabel ?? subclassLabel}:** ${selectedSubclasses.join(", ")}`);
+		lines.push({ label: links?.subclassLabel ?? subclassLabel, value: selectedSubclasses.join(", ") });
 	}
 	if (flat.domains.length) {
-		lines.push(`**${links?.domainLabel ?? "Domain"}:** ${flat.domains.map((d) => d.name).join(", ")}`);
+		lines.push({ label: links?.domainLabel ?? "Domain", value: flat.domains.map((d) => d.name).join(", ") });
 	}
 	if (flat.kits.length) {
-		const kitText = flat.kits.map((kit, i) => links?.kits[i] ?? kit.name).join(", ");
-		lines.push(`**Kit:** ${kitText}`);
+		lines.push({ label: "Kit", value: flat.kits.map((kit, i) => links?.kits[i] ?? kit.name).join(", ") });
 	}
 
-	if (!lines.length) return undefined;
-
-	return ["> [!info]- Background", ...lines.map((l) => `> - ${l}`)].join("\n");
+	return renderBackgroundCallout(lines);
 }
 
 export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult, links?: BackgroundLinks): string {
 	const resourceFeature = flat.features.find((f): f is Extract<FlatFeature, { kind: "resource" }> => f.kind === "resource");
 
-	// Frontmatter is Director-facing reference data meant to populate a Base/
-	// Dataview view across every PC — not a mirror of the whole Note. Culture
-	// and Career stay body-only (not useful to filter/sort a Director's PC
-	// list on). Of the numeric stats, only ones that don't fluctuate mid-
-	// encounter are included (e.g. Victories/XP, not Surges/the Heroic
-	// Resource's current value, which reset/change constantly in play).
-	const frontmatter = yaml
-		.dump(
-			stripUndefined({
-				ds_hero: true,
-				name: hero.name,
-				ancestry: hero.ancestry?.name,
-				class: hero.class?.name,
-				level: stats.level,
-				might: stats.characteristics["Might"] ?? 0,
-				agility: stats.characteristics["Agility"] ?? 0,
-				reason: stats.characteristics["Reason"] ?? 0,
-				intuition: stats.characteristics["Intuition"] ?? 0,
-				presence: stats.characteristics["Presence"] ?? 0,
-				victories: hero.state.victories ?? 0,
-				xp: hero.state.xp ?? 0,
-				max_stamina: stats.stamina,
-				speed: stats.speed,
-			})
-		)
-		.trimEnd();
+	const characteristics = {
+		Might: stats.characteristics["Might"] ?? 0,
+		Agility: stats.characteristics["Agility"] ?? 0,
+		Reason: stats.characteristics["Reason"] ?? 0,
+		Intuition: stats.characteristics["Intuition"] ?? 0,
+		Presence: stats.characteristics["Presence"] ?? 0,
+	};
 
-	const characteristicsBlock = dsBlock("ds-characteristics", {
-		might: stats.characteristics["Might"] ?? 0,
-		agility: stats.characteristics["Agility"] ?? 0,
-		reason: stats.characteristics["Reason"] ?? 0,
-		intuition: stats.characteristics["Intuition"] ?? 0,
-		presence: stats.characteristics["Presence"] ?? 0,
+	const frontmatter = buildFrontmatter({
+		name: hero.name,
+		ancestryName: hero.ancestry?.name,
+		className: hero.class?.name,
+		level: stats.level,
+		characteristics,
+		victories: hero.state.victories ?? 0,
+		xp: hero.state.xp ?? 0,
+		maxStamina: stats.stamina,
+		speed: stats.speed,
 	});
+
+	const characteristicsBlock = buildCharacteristicsBlock(characteristics);
 
 	// current_stamina/temp_stamina reflect the hero's actual condition at
 	// export time (state.staminaDamage/staminaTemp), not always a full bar —
 	// a fresh import with no damage taken naturally comes out equal to max.
-	const vitalsBlock = dsBlock("ds-stamina", {
-		collapsible: true,
-		collapse_default: false,
-		max_stamina: stats.stamina,
-		current_stamina: stats.stamina - (hero.state.staminaDamage ?? 0),
-		temp_stamina: hero.state.staminaTemp ?? 0,
-		height: 1,
-		style: "default",
+	const vitalsBlock = buildVitalsBlock({
+		maxStamina: stats.stamina,
+		currentStamina: stats.stamina - (hero.state.staminaDamage ?? 0),
+		tempStamina: hero.state.staminaTemp ?? 0,
 	});
 
 	// Wrath/Surges/Victories/XP/Renown/Wealth are all state the hero already
@@ -520,36 +304,17 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		["Renown", hero.state.renown ?? 0],
 		["Wealth", hero.state.wealth ?? 0]
 	);
+	const resourcesBlock = buildResourcesBlock(resourceEntries);
 
-	// Grouped 3-per-row (rather than left to wrap naturally at whatever width
-	// the note pane happens to be) so the row always reads Heroic
-	// Resource/Surges/Victories, then XP/Renown/Wealth. Each row needs its own
-	// dedicated parent to CSS-grid against — the counters otherwise share no
-	// container but the whole Note body, so styles.css can't grid-lay them out
-	// 3-wide without this wrapper; see the ds-counter section there.
-	const RESOURCE_ROW_SIZE = 3;
-	const resourceRows: [string, number][][] = [];
-	for (let i = 0; i < resourceEntries.length; i += RESOURCE_ROW_SIZE) {
-		resourceRows.push(resourceEntries.slice(i, i + RESOURCE_ROW_SIZE));
-	}
-	const resourcesBlock = resourceRows
-		.map((row) => {
-			const counters = row.map(([name, value]) => dsBlock("ds-counter", { name, current_value: value, min_value: 0 })).join("\n\n");
-			return `<div class="dshi-resource-row">\n\n${counters}\n\n</div>`;
-		})
-		.join("\n\n");
-
-	const statisticsBlock = dsBlock("ds-values-row", {
-		values: [
-			{ Speed: stats.speed },
-			{ Stability: stats.stability },
-			{ Disengage: stats.disengage },
-			{ "Free Strike": stats.freeStrike },
-			{ Size: stats.size },
-		],
+	const statisticsBlock = buildStatisticsBlock({
+		speed: stats.speed,
+		stability: stats.stability,
+		disengage: stats.disengage,
+		freeStrike: stats.freeStrike,
+		size: stats.size,
 	});
 
-	const skillsBlock = flat.skills.length ? dsBlock("ds-skills", buildSkillsYaml(flat.skills)) : undefined;
+	const skillsBlock = buildSkillsBlock(flat.skills);
 
 	const nonResourceFeatures = migrateGrantedAbilitiesToActions(flat.features.filter((f) => f.kind !== "resource"));
 	const featureGroups = groupFeatures(nonResourceFeatures);
@@ -566,7 +331,7 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 
 	const renderGroupBody = (g: { title: string; items: FlatFeature[] }) =>
 		g.title === "Actions"
-			? renderActionsGroup(g.items, resourceFeature?.name, stats.characteristics)
+			? renderActionsSection(g.items, resourceFeature?.name, stats.characteristics)
 			: g.items.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n");
 
 	const featureSections = mainGroups.map((g) => `## ${g.title}\n\n${renderGroupBody(g)}`);

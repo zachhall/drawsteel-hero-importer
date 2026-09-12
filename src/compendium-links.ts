@@ -2,9 +2,32 @@ import { App, TFile, TFolder } from "obsidian";
 import { DsHero } from "./ds-hero-types";
 import { FlattenResult } from "./feature-flatten";
 
-const CAREERS_FOLDER = "DS Compendium/Rules/Careers";
-const KITS_FOLDER = "DS Compendium/Rules/Kits";
-const FEATURES_ROOT = "DS Compendium/Rules/Features";
+const DEFAULT_COMPENDIUM_ROOT = "DS Compendium";
+
+export function careersFolder(root: string): string {
+	return `${root}/Rules/Careers`;
+}
+export function kitsFolder(root: string): string {
+	return `${root}/Rules/Kits`;
+}
+export function featuresRoot(root: string): string {
+	return `${root}/Rules/Features`;
+}
+export function ancestriesFolder(root: string): string {
+	return `${root}/Rules/Ancestries`;
+}
+export function complicationsFolder(root: string): string {
+	return `${root}/Rules/Complications`;
+}
+export type CultureAspect = "environment" | "organization" | "upbringing";
+const CULTURE_ASPECT_SUBFOLDERS: Record<CultureAspect, string> = {
+	environment: "Environments",
+	organization: "Organization",
+	upbringing: "Upbringing",
+};
+export function cultureAspectFolder(root: string, aspect: CultureAspect): string {
+	return `${root}/Rules/Cultures/${CULTURE_ASPECT_SUBFOLDERS[aspect]}`;
+}
 
 export interface BackgroundLinks {
 	/** Linked markdown for the career value (e.g. "[[Gladiator]]"), or undefined if no matching note exists. */
@@ -15,12 +38,33 @@ export interface BackgroundLinks {
 	subclassLabel?: string;
 	/** Aliased link markdown for the "Domain" field LABEL, or undefined. */
 	domainLabel?: string;
+	ancestry?: string;
+	complication?: string;
+	cultureEnvironment?: string;
+	cultureOrganization?: string;
+	cultureUpbringing?: string;
 }
 
-function findExactFile(app: App, folder: string, name: string): TFile | undefined {
+export function findExactFile(app: App, folder: string, name: string): TFile | undefined {
 	const { vault } = app;
 	const file = vault.getAbstractFileByPath(`${folder}/${name}.md`);
 	return file instanceof TFile ? file : undefined;
+}
+
+/** Every markdown file directly inside `folder` (not recursing) whose basename contains `name` — used for PDF-sourced free text, where a hand-typed value is more likely to have a typo or partial match than an exact ForgeSteel export value. Unlike findConceptNoteInFolder, returns every match (not just the shortest) so a caller can present the full candidate list to the user. */
+export function findAmbiguousMatches(app: App, folder: string, name: string): TFile[] {
+	const { vault } = app;
+	const abstractFolder = vault.getAbstractFileByPath(folder);
+	if (!(abstractFolder instanceof TFolder)) return [];
+
+	const needle = name.toLowerCase();
+	return abstractFolder.children.filter(
+		(c): c is TFile => c instanceof TFile && c.extension === "md" && c.basename.toLowerCase().includes(needle)
+	);
+}
+
+export function findCultureAspectFile(app: App, root: string, aspect: CultureAspect, name: string): TFile | undefined {
+	return findExactFile(app, cultureAspectFolder(root, aspect), name);
 }
 
 /**
@@ -71,29 +115,45 @@ function findConceptNoteInFolder(app: App, folder: string, keyword: string): TFi
  * "Deity and Domains" note) — matching the manual links this logic was
  * reverse-engineered from in the Hellic test Note.
  */
-export function resolveBackgroundLinks(app: App, hero: DsHero, flat: FlattenResult, notePath: string): BackgroundLinks {
+export function resolveBackgroundLinks(
+	app: App,
+	hero: DsHero,
+	flat: FlattenResult,
+	notePath: string,
+	compendiumRoot: string = DEFAULT_COMPENDIUM_ROOT
+): BackgroundLinks {
 	const { fileManager } = app;
 	const result: BackgroundLinks = { kits: [] };
 
 	if (hero.career) {
-		const file = findExactFile(app, CAREERS_FOLDER, hero.career.name);
+		const file = findExactFile(app, careersFolder(compendiumRoot), hero.career.name);
 		if (file) result.career = fileManager.generateMarkdownLink(file, notePath);
 	}
 
 	result.kits = flat.kits.map((kit) => {
-		const file = findExactFile(app, KITS_FOLDER, kit.name);
+		const file = findExactFile(app, kitsFolder(compendiumRoot), kit.name);
 		return file ? fileManager.generateMarkdownLink(file, notePath) : undefined;
 	});
+
+	if (hero.ancestry?.name) {
+		const file = findExactFile(app, ancestriesFolder(compendiumRoot), hero.ancestry.name);
+		if (file) result.ancestry = fileManager.generateMarkdownLink(file, notePath);
+	}
+
+	if (hero.complication?.name) {
+		const file = findExactFile(app, complicationsFolder(compendiumRoot), hero.complication.name);
+		if (file) result.complication = fileManager.generateMarkdownLink(file, notePath);
+	}
 
 	const className = hero.class?.name;
 	const subclassLabel = hero.class?.subclassName;
 	if (className && subclassLabel) {
-		const file = findConceptNoteInFolder(app, `${FEATURES_ROOT}/${className}/1st-Level Features`, subclassLabel);
+		const file = findConceptNoteInFolder(app, `${featuresRoot(compendiumRoot)}/${className}/1st-Level Features`, subclassLabel);
 		if (file) result.subclassLabel = fileManager.generateMarkdownLink(file, notePath, undefined, subclassLabel);
 	}
 
 	if (className && flat.domains.length) {
-		const file = findConceptNoteInFolder(app, `${FEATURES_ROOT}/${className}/1st-Level Features`, "Domain");
+		const file = findConceptNoteInFolder(app, `${featuresRoot(compendiumRoot)}/${className}/1st-Level Features`, "Domain");
 		if (file) result.domainLabel = fileManager.generateMarkdownLink(file, notePath, undefined, "Domain");
 	}
 

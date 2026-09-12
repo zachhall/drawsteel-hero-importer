@@ -6,11 +6,14 @@ export interface HeroImporterSettings {
 	destinationFolder: string;
 	/** Vault-relative folder outdated Notes are archived into on re-import. */
 	archiveFolder: string;
+	/** Vault-relative folder the user's DS Compendium lives in, used to look up Career/Kit/Ancestry/Culture/Complication/Feature notes. */
+	compendiumFolder: string;
 }
 
 export const DEFAULT_SETTINGS: HeroImporterSettings = {
 	destinationFolder: "",
 	archiveFolder: "hero-archive",
+	compendiumFolder: "DS Compendium",
 };
 
 export class HeroImporterSettingTab extends PluginSettingTab {
@@ -28,14 +31,15 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Import a Hero")
 			.setDesc(
-				"Upload a .ds-hero file to create a new Hero Note, formatted with the " +
-					"Draw Steel Elements plugin. This is the only file type accepted. " +
-					".ds-hero files are exported from forgesteel.net, which is not " +
-					"affiliated with this plugin."
+				"Upload a .ds-hero file (exported from forgesteel.net) or a filled official MCDM " +
+					"Draw Steel character sheet PDF to create a new Hero Note, formatted with the " +
+					"Draw Steel Elements plugin. Neither forgesteel.net nor MCDM are affiliated with " +
+					"this plugin. PDF import looks up anything the sheet doesn't carry (full ability " +
+					"text, kit bonuses, etc.) from the DS Compendium folder configured below."
 			)
 			.addButton((button) =>
 				button
-					.setButtonText("Choose .ds-hero file...")
+					.setButtonText("Choose file...")
 					.setCta()
 					.onClick(() => this.plugin.importAsNote())
 			)
@@ -55,6 +59,22 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.destinationFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.destinationFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("DS compendium folder")
+			.setDesc(
+				"Vault folder your DS Compendium lives in — used to look up full rules text for Career, Kit, " +
+					`Ancestry, Culture, and Complication. Leave blank to use "${DEFAULT_SETTINGS.compendiumFolder}".`
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder(DEFAULT_SETTINGS.compendiumFolder)
+					.setValue(this.plugin.settings.compendiumFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.compendiumFolder = value.trim();
 						await this.plugin.saveSettings();
 					})
 			);
