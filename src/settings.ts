@@ -66,8 +66,8 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("DS compendium folder")
 			.setDesc(
-				"Vault folder your DS Compendium lives in — used to look up full rules text for Career, Kit, " +
-					`Ancestry, Culture, and Complication. Leave blank to use "${DEFAULT_SETTINGS.compendiumFolder}".`
+				"Vault folder your DS Compendium lives in — used only for PDF imports, to look up a Kit's stat " +
+					`bonuses, Equipment, and Signature Ability. Leave blank to use "${DEFAULT_SETTINGS.compendiumFolder}".`
 			)
 			.addText((text) =>
 				text

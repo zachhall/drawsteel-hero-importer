@@ -70,10 +70,30 @@ test("buildFrontmatter drops undefined ancestry/class rather than emitting null"
 
 test("buildCharacteristicsBlock and buildVitalsBlock produce their expected ds-* fence", () => {
 	assert.match(buildCharacteristicsBlock(CHARACTERISTICS), /^~~~ds-characteristics\n/);
-	assert.match(buildVitalsBlock({ maxStamina: 30, currentStamina: 25, tempStamina: 2 }), /^~~~ds-stamina\n/);
+	assert.match(
+		buildVitalsBlock({ maxStamina: 30, currentStamina: 25, tempStamina: 2, maxRecoveries: 12, currentRecoveries: 12, recoveryValue: 10 }),
+		/^~~~ds-stamina\n/
+	);
 });
 
-test("buildResourcesBlock chunks into rows of 3, with a partial final row", () => {
+test("buildVitalsBlock includes a Recoveries counter and a Max Recoveries/Recovery Value values-row, with the counter emphasized over the static pair via value_height/name_height", () => {
+	const block = buildVitalsBlock({ maxStamina: 30, currentStamina: 30, tempStamina: 0, maxRecoveries: 12, currentRecoveries: 9, recoveryValue: 10 });
+	assert.match(block, /name: Recoveries/);
+	assert.match(block, /current_value: 9/);
+	assert.match(block, /max_value: 12/);
+	assert.match(block, /Max Recoveries: 12/);
+	assert.match(block, /Recovery Value: 10/);
+
+	const counterBlock = block.match(/~~~ds-counter\n([\s\S]*?)\n~~~/)[1];
+	assert.match(counterBlock, /value_height: 4/);
+	assert.match(counterBlock, /name_height: 1\.2/);
+
+	const valuesRowBlock = block.match(/~~~ds-values-row\n([\s\S]*?)\n~~~/)[1];
+	assert.match(valuesRowBlock, /value_height: 2/);
+	assert.match(valuesRowBlock, /name_height: 0\.8/);
+});
+
+test("buildResourcesBlock chunks into dshi-counter-row blocks of 3, with a partial final row", () => {
 	const entries = [
 		["A", 1],
 		["B", 2],
@@ -82,7 +102,7 @@ test("buildResourcesBlock chunks into rows of 3, with a partial final row", () =
 		["E", 5],
 	];
 	const block = buildResourcesBlock(entries);
-	const rowCount = (block.match(/dshi-resource-row/g) || []).length;
+	const rowCount = (block.match(/~~~dshi-counter-row/g) || []).length;
 	assert.equal(rowCount, 2);
 	assert.match(block, /name: A/);
 	assert.match(block, /name: E/);
@@ -94,7 +114,7 @@ test("buildResourcesBlock handles exactly one row (boundary at 3)", () => {
 		["B", 2],
 		["C", 3],
 	]);
-	const rowCount = (block.match(/dshi-resource-row/g) || []).length;
+	const rowCount = (block.match(/~~~dshi-counter-row/g) || []).length;
 	assert.equal(rowCount, 1);
 });
 

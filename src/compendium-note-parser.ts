@@ -5,12 +5,12 @@
  * scraper, not a reuse of that renderer's parsing.
  */
 
-/** Slices `body` between one heading line matching `headingText` (any `#` level) and the next heading of the same or shallower level, or the end of the body. */
-export function extractSection(body: string, headingText: string): string | undefined {
+/** Slices `body` between the first heading line (any `#` level) `matches` accepts and the next heading of the same or shallower level, or the end of the body. */
+function findHeadingSection(body: string, matches: (headingText: string) => boolean): string | undefined {
 	const lines = body.split("\n");
 	const startIndex = lines.findIndex((line) => {
 		const match = /^(#+)\s+(.*)$/.exec(line.trim());
-		return match && match[2].trim().toLowerCase() === headingText.toLowerCase();
+		return !!match && matches(match[2].trim());
 	});
 	if (startIndex === -1) return undefined;
 
@@ -25,6 +25,42 @@ export function extractSection(body: string, headingText: string): string | unde
 	}
 
 	return lines.slice(startIndex + 1, endIndex).join("\n").trim();
+}
+
+/** Slices `body` between one heading line matching `headingText` exactly (any `#` level, case-insensitive) and the next heading of the same or shallower level, or the end of the body. */
+export function extractSection(body: string, headingText: string): string | undefined {
+	return findHeadingSection(body, (h) => h.toLowerCase() === headingText.toLowerCase());
+}
+
+/**
+ * DS Compendium Ancestry notes head each trait with extra text around the
+ * bare trait name a PDF sheet's "Perks 1" field never carries — a
+ * "Signature Trait: " prefix (e.g. "Signature Trait: Relentless") and a
+ * trailing point cost (e.g. "Bloodfire Rush (1 Point)"). Class feature
+ * headings (e.g. "Wrath", "Oracular Visions") already match as-is. Stripping
+ * both lets one heading search work for either.
+ */
+function normalizeFeatureHeading(heading: string): string {
+	return heading
+		.replace(/^(?:signature trait|purchased [\w\s]+ traits?):?\s*/i, "")
+		.replace(/\s*\(\d+\s*points?\)\s*$/i, "")
+		.trim()
+		.toLowerCase();
+}
+
+/**
+ * Finds a named Ancestry trait or Class feature's own section in a DS
+ * Compendium `Ancestries/<Name>.md` or `Classes/<Name>.md` note — both file
+ * shapes are one note per Ancestry/Class with every trait/feature as its own
+ * heading at whatever level it happens to sit at (see
+ * normalizeFeatureHeading for why an Ancestry trait's heading text needs
+ * normalizing first, unlike a class feature's). Returns undefined if no
+ * heading matches `name` — the caller renders that item name-only rather
+ * than treating a lookup miss as an error (see pdf-compendium-resolver.ts).
+ */
+export function findNamedFeatureSection(body: string, name: string): string | undefined {
+	const target = name.trim().toLowerCase();
+	return findHeadingSection(body, (h) => normalizeFeatureHeading(h) === target);
 }
 
 /** Parses `**Label:** value` lines anywhere in `body` into `{ Label: "value" }`. A label's value can run to the end of its line only — multi-line prose under a label isn't captured here. */

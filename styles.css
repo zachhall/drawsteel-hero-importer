@@ -71,24 +71,17 @@
 /* ---------------------------------------------------------------------- */
 
 /*
- * The Note emits one ds-counter codeblock per Resources value (Heroic
- * Resource, Surges, Victories, XP, Renown, Wealth) rather than one block
- * holding all of them — ds-counter's schema is a single value, it has no
- * multi-entry form the way ds-values-row does. Each ~~~ds-counter~~~ fence
- * is still, at the markdown level, a code block — Obsidian wraps every code
- * block's *rendered* content in a generic ".el-pre" container (confirmed via
+ * A standalone ~~~ds-counter~~~ fence (only the Vitals section's Recoveries
+ * counter still uses one directly — Resources counters render via
+ * ~~~dshi-counter-row~~~ instead, see that section below) is still, at the
+ * markdown level, a code block — Obsidian wraps every code block's
+ * *rendered* content in a generic ".el-pre" container (confirmed via
  * DevTools: ds-elements' own ".block-language-ds-counter" div sits one level
  * *inside* that, not at the top), and that outer ".el-pre" is what's actually
- * display:block, stacking consecutive counters one per line regardless of
- * any display change on the inner div. Targeting ".el-pre" directly would
- * also catch every *other* code block in the Note (ds-feature, etc.), so
+ * display:block. Targeting ".el-pre" directly would also catch every *other*
+ * code block in the Note (ds-feature, etc.), so
  * ":has(> .block-language-ds-counter)" scopes it to only the ".el-pre"
  * wrappers that actually contain a counter.
- *
- * This rule is the fallback for a counter outside the Resources section
- * (auto-wrap at whatever width fits). Within Resources, the ".dshi-resource-
- * row" rule further down overrides display/width/margin so each row is a
- * fixed, deterministic 3-column grid instead.
  */
 .el-pre:has(> .block-language-ds-counter) {
 	display: inline-flex;
@@ -105,31 +98,48 @@
 	width: auto;
 }
 
+/* ---------------------------------------------------------------------- */
+/* dshi-counter-row                                                        */
+/* ---------------------------------------------------------------------- */
+
 /*
- * The Resources section wraps each row of counters in its own
- * <div class="dshi-resource-row"> (see markdown-builder.ts) specifically so
- * this can grid-lay them — plain sibling counters share no parent but the
- * whole Note body, so nothing shy of an explicit wrapper lets CSS treat just
- * "this group of 3" as a row. CSS Grid (not flex-wrap) is what guarantees
- * exactly 3 equal-width columns regardless of the note pane's width, rather
- * than however many happen to fit before wrapping.
+ * A single ~~~dshi-counter-row~~~ codeblock (registered and rendered end-to-
+ * end by this plugin — see src/counter-row-view.ts) packs 2-3 counters into
+ * one real container it fully controls, so they lay out in one row with no
+ * post-render DOM patching at all. An earlier version tried to achieve the
+ * same row grouping by patching separately-rendered ~~~ds-counter~~~ blocks
+ * together after the fact via a document-wide MutationObserver — dropped as
+ * too fragile for what a single owned codeblock now does directly.
  *
- * These selectors are more specific than the ".el-pre:has(...)" rule above
- * (two classes instead of one), so within a resource row they win on
- * display/width/margin only — background, border, radius, padding still
- * come from that shared rule.
+ * Each counter inside the row reproduces draw-steel-elements' own
+ * ".ds-counter-container" structure exactly (".ds-counter-display-
+ * container", ".ds-counter-value", ".ds-counter-name", ".ds-counter-
+ * controls", ".ds-counter-button" — all draw-steel-elements' own class
+ * names, confirmed by reading its compiled main.js, not invented here), so
+ * draw-steel-elements' own (unscoped, base) ".ds-counter-container" rules
+ * apply to each counter unmodified. This file only lays out the row itself
+ * — except for the card background/border below, which IS a real addition
+ * here: a standalone ~~~ds-counter~~~ gets that look from this file's own
+ * ".el-pre:has(> .block-language-ds-counter)" rule above, keyed on the
+ * ".block-language-ds-counter" class Obsidian auto-adds to *that* specific
+ * codeblock's own wrapper — a dshi-counter-row's counters sit inside one
+ * shared ".block-language-dshi-counter-row" wrapper instead (there's only
+ * one codeblock for the whole row), so that selector can never match them;
+ * each counter needs the same background/border applied directly instead.
  */
-.dshi-resource-row {
-	display: grid;
-	grid-template-columns: repeat(3, 1fr);
+.dshi-counter-row {
+	display: flex;
+	flex-wrap: wrap;
 	gap: 0.5em;
 	margin-bottom: 0.5em;
 }
 
-.dshi-resource-row .el-pre:has(> .block-language-ds-counter) {
-	display: block;
-	width: 100%;
-	margin: 0;
+.dshi-counter-row > .ds-counter-container {
+	flex: 1 1 0;
+	padding: 0.5em 0.75em;
+	background-color: var(--background-primary-alt);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
 }
 
 /* ---------------------------------------------------------------------- */

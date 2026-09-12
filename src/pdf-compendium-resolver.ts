@@ -1,29 +1,41 @@
 import { App, TFile } from "obsidian";
-import { careersFolder, findAmbiguousMatches, findExactFile, kitsFolder } from "./compendium-links";
-import { parseKitBonuses, ParsedKitBonuses, parseKitEquipment, parseSignatureAbility, ParsedSignatureAbility } from "./compendium-note-parser";
+import { ancestriesFolder, classesFolder, findAmbiguousMatches, findExactFile, kitsFolder } from "./compendium-links";
+import {
+	findNamedFeatureSection,
+	parseKitBonuses,
+	ParsedKitBonuses,
+	parseKitEquipment,
+	parseSignatureAbility,
+	ParsedSignatureAbility,
+} from "./compendium-note-parser";
 import { promptForMatchResolution } from "./match-resolution-modal";
 import { PdfHeroData } from "./pdf-hero-types";
 
 /**
  * Resolves only what's needed to fill an actual data gap the PDF sheet
- * leaves open — Career and Kit — each as a note LINK (matching
- * markdown-builder.ts's Background callout, which never embeds Career/Kit
- * prose either) plus, for Kit, the specific structured numbers/text the
- * sheet doesn't otherwise carry (stat bonuses, its Equipment listing, its
- * Signature Ability). Ancestry, Complication, and Culture aspects are never
- * resolved here: the sheet's plain name for each is already enough to show
- * in the Note, and dumping a matching compendium note's full body would add
- * narrative prose nobody asked to have embedded (see conversation — that
- * used to happen and was explicitly reversed).
+ * leaves open — Kit's specific structured numbers/text the sheet doesn't
+ * otherwise carry (stat bonuses, its Equipment listing, its Signature
+ * Ability), found by matching its name against the DS Compendium. Career,
+ * Ancestry, Complication, and Culture aspects are never resolved here: their
+ * plain sheet name is already enough to show in the Note (compendium
+ * wikilinks for background terms used to be generated here and in
+ * markdown-builder.ts — removed; that's a different plugin's job now, see
+ * drawsteel-rule-term-linker), and dumping a matching compendium note's full
+ * body would add narrative prose nobody asked to have embedded (see
+ * conversation — that used to happen and was explicitly reversed).
  */
-export interface ResolvedCompendiumLink {
-	file: TFile;
-	link: string;
+/** One Ancestry trait or Class feature, resolved by name against the DS Compendium. `description` is undefined when either the Ancestry/Class note itself wasn't found or it has no heading matching this name — rendered name-only in that case (see buildNamedFeatureBlocks), never dropped. */
+export interface ResolvedNamedFeature {
+	name: string;
+	description?: string;
 }
 
 export interface ResolvedPdfCompendiumData {
-	career?: ResolvedCompendiumLink;
-	kit?: ResolvedCompendiumLink & { bonuses: ParsedKitBonuses; signatureAbility?: ParsedSignatureAbility; equipment?: string };
+	kit?: { file: TFile; bonuses: ParsedKitBonuses; signatureAbility?: ParsedSignatureAbility; equipment?: string };
+	/** From the sheet's "Perks 1" field — see PdfHeroData.ancestryTraitNames. */
+	ancestryTraits?: ResolvedNamedFeature[];
+	/** From the sheet's "Class Features 1" field, already excluding whichever entry names the class's own Heroic Resource (e.g. "Wrath") — that's already shown as its own Resources counter, not a trait to also list here. */
+	classFeatures?: ResolvedNamedFeature[];
 }
 
 /** Returned by resolveOne to distinguish "no value on the sheet, nothing to resolve" from "the user explicitly skipped this one" from "the whole import was cancelled". */
@@ -61,47 +73,68 @@ function stripFrontmatter(app: App, file: TFile, content: string): string {
 	return body.replace(/^\s+/, "");
 }
 
-async function toResolvedLink(app: App, notePath: string, outcome: ResolveOutcome): Promise<(ResolvedCompendiumLink & { body: string }) | undefined | "cancelled"> {
+async function toResolvedFile(app: App, outcome: ResolveOutcome): Promise<{ file: TFile; body: string } | undefined | "cancelled"> {
 	if ("cancelled" in outcome) return "cancelled";
 	if ("skipped" in outcome) return undefined;
 
-	const { vault, fileManager } = app;
+	const { vault } = app;
 	const content = await vault.cachedRead(outcome.file);
-	return { file: outcome.file, link: fileManager.generateMarkdownLink(outcome.file, notePath), body: stripFrontmatter(app, outcome.file, content) };
+	return { file: outcome.file, body: stripFrontmatter(app, outcome.file, content) };
 }
 
 /**
- * Resolves Career and Kit against the DS Compendium, awaiting a
- * MatchResolutionModal for anything ambiguous or unmatched before this
- * function returns, per the user's explicit "prompt, never silently guess"
- * decision. Returns undefined if the user cancelled the import from either
- * prompt.
+ * Ancestry/Class names are canonical, closed-vocabulary sheet fields (a
+ * dropdown pick, not free text like Kit's guessed-at name), so this only
+ * ever tries an exact `<folder>/<name>.md` match — no ambiguous-match modal
+ * the way resolveOne needs for Kit. Each DS Compendium Ancestry/Class note is
+ * one file holding every one of its traits/features as its own heading (see
+ * findNamedFeatureSection); a name with no matching heading in that file, or
+ * no file at all (unknown Ancestry/Class, or the compendium folder not
+ * present in this vault), renders name-only rather than failing the import.
  */
-export async function resolvePdfCompendiumLinks(
+async function resolveNamedFeatures(
 	app: App,
-	pdfHero: PdfHeroData,
-	compendiumRoot: string,
-	notePath: string
-): Promise<ResolvedPdfCompendiumData | undefined> {
+	folder: string,
+	conceptName: string | undefined,
+	names: string[]
+): Promise<ResolvedNamedFeature[] | undefined> {
+	if (!names.length) return undefined;
+
+	const file = conceptName ? findExactFile(app, folder, conceptName) : undefined;
+	if (!file) return names.map((name) => ({ name }));
+
+	const { vault } = app;
+	const body = stripFrontmatter(app, file, await vault.cachedRead(file));
+	return names.map((name) => ({ name, description: findNamedFeatureSection(body, name) }));
+}
+
+/**
+ * Resolves Kit against the DS Compendium, awaiting a MatchResolutionModal
+ * for anything ambiguous or unmatched before this function returns, per the
+ * user's explicit "prompt, never silently guess" decision. Returns
+ * undefined if the user cancelled the import from that prompt.
+ */
+export async function resolvePdfCompendiumLinks(app: App, pdfHero: PdfHeroData, compendiumRoot: string): Promise<ResolvedPdfCompendiumData | undefined> {
 	const result: ResolvedPdfCompendiumData = {};
 
-	const careerOutcome = await resolveOne(app, "Career", careersFolder(compendiumRoot), pdfHero.careerName);
-	const careerLink = await toResolvedLink(app, notePath, careerOutcome);
-	if (careerLink === "cancelled") return undefined;
-	if (careerLink) result.career = { file: careerLink.file, link: careerLink.link };
-
 	const kitOutcome = await resolveOne(app, "Kit", kitsFolder(compendiumRoot), pdfHero.kitName);
-	const kitLink = await toResolvedLink(app, notePath, kitOutcome);
-	if (kitLink === "cancelled") return undefined;
-	if (kitLink) {
+	const kitFile = await toResolvedFile(app, kitOutcome);
+	if (kitFile === "cancelled") return undefined;
+	if (kitFile) {
 		result.kit = {
-			file: kitLink.file,
-			link: kitLink.link,
-			bonuses: parseKitBonuses(kitLink.body),
-			signatureAbility: parseSignatureAbility(kitLink.body),
-			equipment: parseKitEquipment(kitLink.body),
+			file: kitFile.file,
+			bonuses: parseKitBonuses(kitFile.body),
+			signatureAbility: parseSignatureAbility(kitFile.body),
+			equipment: parseKitEquipment(kitFile.body),
 		};
 	}
+
+	result.ancestryTraits = await resolveNamedFeatures(app, ancestriesFolder(compendiumRoot), pdfHero.ancestryName, pdfHero.ancestryTraitNames);
+
+	const classFeatureNames = pdfHero.classFeatureNames.filter(
+		(name) => name.toLowerCase() !== (pdfHero.heroicResourceName ?? "").toLowerCase()
+	);
+	result.classFeatures = await resolveNamedFeatures(app, classesFolder(compendiumRoot), pdfHero.className, classFeatureNames);
 
 	return result;
 }

@@ -1,11 +1,10 @@
-import { BackgroundLinks } from "./compendium-links";
 import { DsAbility, DsAbilityDistance, DsAbilitySection, DsHero } from "./ds-hero-types";
 import { FlatFeature, FlattenResult } from "./feature-flatten";
 import { HeroStats } from "./hero-stats";
 import { dsBlock, resolveTierText } from "./note-block-helpers";
 import {
 	abilityToFeatureBlock,
-	buildBackgroundCallout as renderBackgroundCallout,
+	buildBackgroundInfoLines as renderBackgroundInfoLines,
 	buildCharacteristicsBlock,
 	buildFrontmatter,
 	buildResourcesBlock,
@@ -221,41 +220,44 @@ function renderActionsSection(items: FlatFeature[], resourceName: string | undef
  * Culture, Career, the hero's subclass pick (e.g. a Censor's Order), Domain,
  * and Kit often carry no ability/feature of their own to hang a ds-feature
  * block on, so without this they'd be invisible in the Note despite being
- * real, chosen parts of the build. Rendered as a single collapsed Obsidian
- * callout (`- ` right after the callout type folds it closed by default) so
- * this stays available without adding to the Note's default scroll depth —
- * a plain heading would be foldable too, but only after the reader folds it
- * themselves each time the Note is regenerated.
+ * real, chosen parts of the build. Rendered as plain text at the top of
+ * "## Background Info" (see buildHeroNote), above its "### Ancestry"/etc.
+ * groups — previously its own collapsed Obsidian callout near the top of
+ * the Note, dropped in favor of living alongside the rest of the hero's
+ * background info in one place.
  *
- * `links` (see compendium-links.ts) supplies whichever DS Compendium
- * wikilinks could be resolved against the vault's actual notes — a field
- * renders as plain text when there's nothing to link it to.
+ * Values render as plain names, not compendium wikilinks — this plugin used
+ * to resolve them against the vault's DS Compendium notes (see git history,
+ * compendium-links.ts's now-removed resolveBackgroundLinks), but that was
+ * dropped: linking rule terms is a different plugin's job
+ * (drawsteel-rule-term-linker), not something a Note generator should also
+ * be doing.
  */
-function buildBackgroundCallout(hero: DsHero, flat: FlattenResult, links: BackgroundLinks | undefined): string | undefined {
+function buildBackgroundInfoLines(hero: DsHero, flat: FlattenResult): string | undefined {
 	const lines: { label: string; value: string }[] = [];
 
 	if (hero.culture) {
 		lines.push({ label: "Culture", value: `${hero.culture.name}${hero.culture.type ? ` (${hero.culture.type})` : ""}` });
 	}
 	if (hero.career) {
-		lines.push({ label: "Career", value: links?.career ?? hero.career.name });
+		lines.push({ label: "Career", value: hero.career.name });
 	}
 	const subclassLabel = hero.class?.subclassName;
 	const selectedSubclasses = hero.class?.subclasses?.filter((s) => s.selected).map((s) => s.name) ?? [];
 	if (subclassLabel && selectedSubclasses.length) {
-		lines.push({ label: links?.subclassLabel ?? subclassLabel, value: selectedSubclasses.join(", ") });
+		lines.push({ label: subclassLabel, value: selectedSubclasses.join(", ") });
 	}
 	if (flat.domains.length) {
-		lines.push({ label: links?.domainLabel ?? "Domain", value: flat.domains.map((d) => d.name).join(", ") });
+		lines.push({ label: "Domain", value: flat.domains.map((d) => d.name).join(", ") });
 	}
 	if (flat.kits.length) {
-		lines.push({ label: "Kit", value: flat.kits.map((kit, i) => links?.kits[i] ?? kit.name).join(", ") });
+		lines.push({ label: "Kit", value: flat.kits.map((kit) => kit.name).join(", ") });
 	}
 
-	return renderBackgroundCallout(lines);
+	return renderBackgroundInfoLines(lines);
 }
 
-export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult, links?: BackgroundLinks): string {
+export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResult): string {
 	const resourceFeature = flat.features.find((f): f is Extract<FlatFeature, { kind: "resource" }> => f.kind === "resource");
 
 	const characteristics = {
@@ -287,6 +289,9 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		maxStamina: stats.stamina,
 		currentStamina: stats.stamina - (hero.state.staminaDamage ?? 0),
 		tempStamina: hero.state.staminaTemp ?? 0,
+		maxRecoveries: stats.recoveries,
+		currentRecoveries: stats.recoveries - (hero.state.recoveriesUsed ?? 0),
+		recoveryValue: stats.recoveryValue,
 	});
 
 	// Wrath/Surges/Victories/XP/Renown/Wealth are all state the hero already
@@ -340,9 +345,14 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		? `## Traits\n\n${traitItems.map((f) => renderFeature(f, resourceFeature?.name, stats.characteristics)).join("\n\n")}`
 		: undefined;
 
-	const backgroundInfoSection = backgroundInfoGroups.length
-		? `## Background Info\n\n${backgroundInfoGroups.map((g) => `### ${g.title}\n\n${renderGroupBody(g)}`).join("\n\n")}`
-		: undefined;
+	// Culture/Career/Subclass/Domain/Kit lines (see buildBackgroundInfoLines)
+	// come first, above whichever ### group happens to be first — plain text,
+	// not its own subsection, so it reads as this section's own lead-in.
+	const backgroundInfoLines = buildBackgroundInfoLines(hero, flat);
+	const backgroundInfoBody = [backgroundInfoLines, ...backgroundInfoGroups.map((g) => `### ${g.title}\n\n${renderGroupBody(g)}`)]
+		.filter((s): s is string => !!s)
+		.join("\n\n");
+	const backgroundInfoSection = backgroundInfoBody ? `## Background Info\n\n${backgroundInfoBody}` : undefined;
 
 	const detailsParts: string[] = [];
 	if (flat.languages.length) {
@@ -355,13 +365,10 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 
 	const notesSection = hero.state.notes ? `## Notes\n\n${hero.state.notes}` : undefined;
 
-	const backgroundCallout = buildBackgroundCallout(hero, flat, links);
-
 	const sections = [
 		`---\n${frontmatter}\n---`,
 		`# ${hero.name}`,
 		`*Level ${stats.level} ${hero.ancestry?.name ?? ""} ${hero.class?.name ?? ""}*`.trim(),
-		backgroundCallout,
 		`## Characteristics\n\n${characteristicsBlock}`,
 		`## Vitals\n\n${vitalsBlock}`,
 		`## Resources\n\n${resourcesBlock}`,
@@ -374,11 +381,12 @@ export function buildHeroNote(hero: DsHero, stats: HeroStats, flat: FlattenResul
 		backgroundInfoSection,
 	]
 		.filter((s): s is string => !!s)
-		// A section for a top-level ## heading (Background Info's nested ###
-		// groups included — the <hr> marks the end of the whole section, not
-		// each subgroup within it) gets a trailing divider so the Note reads as
-		// clearly separated blocks; the title/subtitle/Background callout above
-		// Characteristics aren't headed sections themselves, so they're left alone.
+		// A section for a top-level ## heading (Background Info's lead-in lines
+		// plus its nested ### groups included — the <hr> marks the end of the
+		// whole section, not each subgroup within it) gets a trailing divider
+		// so the Note reads as clearly separated blocks; the title/subtitle
+		// above Characteristics aren't headed sections themselves, so they're
+		// left alone.
 		.map((s) => (s.startsWith("## ") ? `${s}\n\n<hr>` : s));
 
 	return sections.join("\n\n");

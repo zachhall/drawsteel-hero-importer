@@ -6,7 +6,10 @@ import { importTs } from "./ts-loader.mjs";
 
 const { extractAbilities } = await importTs(join(ROOT, "src/pdf-ability-grid.ts"));
 
-// Fixture modeled on a real filled sheet's raw field dump (a level 1 Tactician).
+// Fixture modeled on real filled sheets' raw field dumps (a level 1 Tactician,
+// then a level 1 Censor "Hellic" that confirmed the "Ability Type" field's
+// real naming: row 0 is "Ability Type.<col>", row 1 is "Ability Type1.<col>",
+// row 2 "Ability Type2.<col>" — not one label per whole row.
 function rawFields(entries) {
 	return new Map(Object.entries(entries));
 }
@@ -20,7 +23,7 @@ test("extractAbilities reads the grid into one entry per filled 'Ability Name' c
 		"Ability Distance.0.0": "Melee 2",
 		"Ability Keywords.0.0": "Charge, Melee, Strike, Weapon",
 		"Ability Details.0.0": "Power Roll + 2\nTier 1: 7 damage",
-		"Ability Type.1": "Heroic",
+		"Ability Type1.1": "Heroic",
 		"Ability Name.1.1": "Mark",
 		"Ability Cost.1.1": undefined,
 	});
@@ -42,4 +45,26 @@ test("extractAbilities reads the grid into one entry per filled 'Ability Name' c
 test("extractAbilities skips cells with no name", () => {
 	const raw = rawFields({ "Ability Action.0.0": "Main" });
 	assert.deepEqual(extractAbilities(raw), []);
+});
+
+test("extractAbilities reads each cell's own type within a row, not one label for the whole row", () => {
+	// Regression for a real bug: three abilities in the same row on the
+	// Hellic sample sheet had three different types (Signature/Other/Heroic),
+	// but the grid's "Ability Type" fields fold the row number into the field
+	// name prefix rather than the shared ".<row>." infix every other grid
+	// field uses, so a naive `Ability Type.${row}` lookup silently grabbed a
+	// different cell's type and applied it to the entire row.
+	const raw = rawFields({
+		"Ability Name.0.0": "Every Step ... Death!",
+		"Ability Type.0": "Signature",
+		"Ability Name.0.1": "Pain for Pain",
+		"Ability Type.1": "Other",
+		"Ability Name.0.2": "Repent!",
+		"Ability Type.2": "Heroic",
+	});
+
+	const [a, b, c] = extractAbilities(raw);
+	assert.equal(a.type, "Signature");
+	assert.equal(b.type, "Other");
+	assert.equal(c.type, "Heroic");
 });

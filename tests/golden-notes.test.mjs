@@ -21,8 +21,7 @@ const { buildHeroNote } = await importTs(join(ROOT, "src/markdown-builder.ts"));
 function loadFixture(base) {
 	const hero = JSON.parse(readFileSync(join(ROOT, `tests/fixtures/${base}.ds-hero.json`), "utf8"));
 	const golden = readFileSync(join(ROOT, `tests/fixtures/${base}.golden.md`), "utf8");
-	const links = JSON.parse(readFileSync(join(ROOT, `tests/fixtures/${base}.background-links.json`), "utf8"));
-	return { hero, golden, links };
+	return { hero, golden };
 }
 
 // Normalizes only line-ending convention and a single trailing-EOF newline
@@ -35,10 +34,10 @@ function normalize(s) {
 
 for (const base of ["hellic", "barerhit"]) {
 	test(`buildHeroNote matches golden fixture: ${base}`, () => {
-		const { hero, golden, links } = loadFixture(base);
+		const { hero, golden } = loadFixture(base);
 		const flat = flattenHeroFeatures(hero, hero.class?.level ?? 1);
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits, flat.characteristicBonuses);
-		const actual = buildHeroNote(hero, stats, flat, links);
+		const actual = buildHeroNote(hero, stats, flat);
 		assert.equal(normalize(actual), normalize(golden));
 	});
 }

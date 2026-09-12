@@ -1,6 +1,7 @@
 import { Notice, Platform, Plugin, TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
 import { ConfirmModal } from "./src/confirm-modal";
-import { resolveBackgroundLinks } from "./src/compendium-links";
+import { parseCounterRow } from "./src/counter-row-block";
+import { CounterRowView } from "./src/counter-row-view";
 import { DsHero } from "./src/ds-hero-types";
 import { extractDsCounterValues, FRONTMATTER_SYNCED_COUNTERS } from "./src/frontmatter-sync";
 import { flattenHeroFeatures } from "./src/feature-flatten";
@@ -64,6 +65,36 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 
 		this.addSettingTab(new HeroImporterSettingTab(this.app, this));
 
+		// Renders 2-3 counters as one real row (see src/counter-row-view.ts for
+		// why this is a genuine codeblock this plugin owns end-to-end, not a
+		// post-render DOM patch). Explicit negative sortOrder: other plugins
+		// that scan rendered text (e.g. drawsteel-rule-term-linker) register a
+		// plain registerMarkdownPostProcessor at the default sortOrder (0) —
+		// without running before that, this handler's own DOM-population would
+		// lose the race whenever this plugin happens to load after theirs
+		// (Obsidian breaks sortOrder ties by registration/plugin-load order),
+		// leaving the row's counter names still empty when the other
+		// plugin's scan runs, silently breaking whatever depends on that text
+		// already being there. A standalone ds-counter block never had this
+		// problem since draw-steel-elements (which renders it) has always
+		// loaded before any plugin that only post-processes.
+		this.registerMarkdownCodeBlockProcessor(
+			"dshi-counter-row",
+			(source, el, ctx) => {
+				try {
+					const view = new CounterRowView(this.app, parseCounterRow(source), ctx, el);
+					ctx.addChild(view);
+					view.render();
+				} catch (err) {
+					el.createDiv({
+						cls: "error-message",
+						text: `Draw Steel Hero Importer: failed to render dshi-counter-row — ${err instanceof Error ? err.message : String(err)}`,
+					});
+				}
+			},
+			-100
+		);
+
 		// Clicking a ds-counter's +/- rewrites that codeblock's own YAML, not the
 		// Note's frontmatter — this is what keeps a synced property (see
 		// FRONTMATTER_SYNCED_COUNTERS) following it instead.
@@ -108,9 +139,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		const heroLevel = hero.class?.level ?? 1;
 		const flat = flattenHeroFeatures(hero, heroLevel);
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits, flat.characteristicBonuses);
-		const notePath = this.computeNotePath(hero.name);
-		const links = resolveBackgroundLinks(this.app, hero, flat, notePath, this.settings.compendiumFolder);
-		const content = buildHeroNote(hero, stats, flat, links);
+		const content = buildHeroNote(hero, stats, flat);
 
 		const target = await this.writeHeroFile(hero.name, content);
 
@@ -125,8 +154,7 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 			if (DSHI_PDF_DEBUG) debugDumpRawFields(rawFields);
 
 			const pdfHero = parsePdfHeroData(rawFields);
-			const notePath = this.computeNotePath(pdfHero.name);
-			const compendium = await resolvePdfCompendiumLinks(this.app, pdfHero, this.settings.compendiumFolder, notePath);
+			const compendium = await resolvePdfCompendiumLinks(this.app, pdfHero, this.settings.compendiumFolder);
 			if (!compendium) return; // user cancelled from a match-resolution prompt
 
 			const content = buildPdfHeroNote(pdfHero, compendium);
@@ -210,6 +238,13 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 				type: "file",
 				cls: "dshi-hidden-file-input",
 				attr: { accept: ".ds-hero,.pdf" },
+			});
+			// "change" never fires on cancel, so without this the input is left
+			// behind in the DOM (invisible but real), and the returned promise
+			// never resolves, every time the user backs out of the picker.
+			input.addEventListener("cancel", () => {
+				input.remove();
+				resolve(undefined);
 			});
 			input.addEventListener("change", () => {
 				const file = input.files?.[0];

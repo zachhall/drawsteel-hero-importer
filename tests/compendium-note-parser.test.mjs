@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
 	extractSection,
+	findNamedFeatureSection,
 	parseBoldLabelLines,
 	parseCareerInfo,
 	parseGfmTable,
@@ -100,4 +101,61 @@ test("parseCareerInfo reads Skills/Languages/Perk bold-label lines", () => {
 	assert.equal(info.skillsText, "Alertness, Stealth");
 	assert.equal(info.languagesText, "Common, one of your choice");
 	assert.equal(info.perkText, "Fast Talker");
+});
+
+// Fixture modeled on the real DS Compendium notes Rules/Ancestries/Orc.md
+// and Rules/Classes/Censor.md — the heading-noise findNamedFeatureSection
+// has to strip is real, not hypothetical (see its own doc comment).
+const ANCESTRY_BODY = `
+### Orc Traits
+
+#### Signature Trait: Relentless
+
+Free strike text.
+
+#### Purchased Orc Traits
+
+##### Bloodfire Rush (1 Point)
+
+Speed bonus text.
+
+##### Glowing Recovery (2 Points)
+
+Recovery text.
+`;
+
+const CLASS_BODY = `
+#### Wrath
+
+Resource text.
+
+##### Wrath in Combat
+
+Combat-only wrath text.
+
+#### Judgment
+
+Judgment text.
+`;
+
+test("findNamedFeatureSection matches a plain trait name against a 'Signature Trait: ' heading", () => {
+	assert.match(findNamedFeatureSection(ANCESTRY_BODY, "Relentless"), /Free strike text/);
+});
+
+test("findNamedFeatureSection matches a plain trait name against a '(N Point(s))' heading", () => {
+	assert.match(findNamedFeatureSection(ANCESTRY_BODY, "Bloodfire Rush"), /Speed bonus text/);
+	assert.match(findNamedFeatureSection(ANCESTRY_BODY, "Glowing Recovery"), /Recovery text/);
+});
+
+test("findNamedFeatureSection matches a class feature heading as-is and stops at the next same-or-shallower heading", () => {
+	const section = findNamedFeatureSection(CLASS_BODY, "Wrath");
+	assert.match(section, /Resource text/);
+	// "Wrath in Combat" is a deeper heading nested under "Wrath" — included.
+	assert.match(section, /Combat-only wrath text/);
+	// "Judgment" is the next heading at the same level as "Wrath" — excluded.
+	assert.doesNotMatch(section, /Judgment text/);
+});
+
+test("findNamedFeatureSection returns undefined when no heading matches", () => {
+	assert.equal(findNamedFeatureSection(ANCESTRY_BODY, "Nonexistent Trait"), undefined);
 });

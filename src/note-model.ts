@@ -64,26 +64,75 @@ export function buildCharacteristicsBlock(characteristics: NoteCharacteristics):
 	});
 }
 
-export function buildVitalsBlock(input: { maxStamina: number; currentStamina: number; tempStamina: number }): string {
-	return dsBlock("ds-stamina", {
+/**
+ * Recoveries have no equivalent in ds-stamina's own schema (confirmed
+ * against draw-steel-elements' StaminaBarSchema.yaml — it has no
+ * recovery-related fields at all; `height` is purely a bar-thickness
+ * multiplier), so they're rendered as a separate ds-counter (the current/max
+ * pool, trackable during play) plus a ds-values-row (Max Recoveries —
+ * repeated from the counter's own max, since ds-counter has no label for its
+ * max value — and Recovery Value, the flat stamina-per-recovery number,
+ * which has no "pool" to track and so isn't itself a counter). They render as
+ * two separate blocks, each wrapping to its own line at whatever width the
+ * Note pane happens to be — a CSS-only adjacency grouping (`:has()` sibling
+ * selectors) was tried and reverted, since the counter and values-row are
+ * separate, differently-shaped elements with no shared container to force
+ * into one row.
+ *
+ * Visual hierarchy between them (Current Recoveries — the frequently-
+ * changing, more important value — vs. the static Max Recoveries/Recovery
+ * Value pair) is expressed via draw-steel-elements' own `value_height`/
+ * `name_height` fields instead: the counter's pushed above its own default
+ * (3/1), the values-row's pulled below its matching default, so the size
+ * gap itself carries the emphasis without any custom CSS.
+ */
+export function buildVitalsBlock(input: {
+	maxStamina: number;
+	currentStamina: number;
+	tempStamina: number;
+	maxRecoveries: number;
+	currentRecoveries: number;
+	recoveryValue: number;
+}): string {
+	const staminaBlock = dsBlock("ds-stamina", {
 		collapsible: true,
 		collapse_default: false,
 		max_stamina: input.maxStamina,
 		current_stamina: input.currentStamina,
 		temp_stamina: input.tempStamina,
-		height: 1,
+		height: 3,
 		style: "default",
 	});
+
+	const recoveriesCounter = dsBlock("ds-counter", {
+		name: "Recoveries",
+		current_value: input.currentRecoveries,
+		min_value: 0,
+		max_value: input.maxRecoveries,
+		value_height: 4,
+		name_height: 1.2,
+	});
+
+	const recoveriesValuesRow = dsBlock("ds-values-row", {
+		values: [{ "Max Recoveries": input.maxRecoveries }, { "Recovery Value": input.recoveryValue }],
+		value_height: 2,
+		name_height: 0.8,
+	});
+
+	return `${staminaBlock}\n\n${recoveriesCounter}\n\n${recoveriesValuesRow}`;
 }
 
 /**
- * Grouped 3-per-row (rather than left to wrap naturally at whatever width
- * the note pane happens to be) so a row of counters reads as a coherent set
- * (e.g. Heroic Resource/Surges/Victories, then XP/Renown/Wealth). Each row
- * needs its own dedicated parent to CSS-grid against — the counters
- * otherwise share no container but the whole Note body, so styles.css can't
- * grid-lay them out 3-wide without this wrapper; see the ds-counter section
- * there.
+ * Grouped 3-per-row (rather than left to wrap naturally at whatever width the
+ * note pane happens to be) so a row of counters reads as a coherent set (e.g.
+ * Heroic Resource/Surges/Victories, then XP/Renown/Wealth). Each row is one
+ * `~~~dshi-counter-row~~~` codeblock (src/counter-row-view.ts) — a genuine
+ * atomic block this plugin registers and renders end-to-end, not three
+ * separate `ds-counter` blocks grouped after the fact. An earlier version did
+ * exactly that (a document-wide MutationObserver patching separately-rendered
+ * blocks into a shared wrapper div after Reading View painted them) — dropped
+ * as too fragile for what a single owned codeblock achieves directly, with no
+ * DOM-patching risk at all.
  */
 const RESOURCE_ROW_SIZE = 3;
 
@@ -93,10 +142,7 @@ export function buildResourcesBlock(entries: [string, number][]): string {
 		rows.push(entries.slice(i, i + RESOURCE_ROW_SIZE));
 	}
 	return rows
-		.map((row) => {
-			const counters = row.map(([name, value]) => dsBlock("ds-counter", { name, current_value: value, min_value: 0 })).join("\n\n");
-			return `<div class="dshi-resource-row">\n\n${counters}\n\n</div>`;
-		})
+		.map((row) => dsBlock("dshi-counter-row", { counters: row.map(([name, value]) => ({ name, current_value: value, min_value: 0 })) }))
 		.join("\n\n");
 }
 
@@ -244,16 +290,41 @@ export function renderActionsGroup(abilities: NoteAbility[], otherRendered: stri
 }
 
 /**
- * Renders the "> [!info]- Background" callout wrapper + bullet formatting —
- * shared between both import paths. Which lines exist and in what order is
- * each caller's own concern (ForgeSteel includes Subclass/Domain lines that
- * have no PDF equivalent); this only renders whatever ordered label/value
- * pairs it's given. Returns undefined for an empty list, so a caller need
- * not guard for "no lines at all" itself.
+ * Renders plain bullet-list text (no callout wrapper — that was dropped in
+ * favor of plain text inside markdown-builder.ts's "## Background Info"
+ * section) — shared between both import paths. Which lines exist and in
+ * what order is each caller's own concern (ForgeSteel includes Subclass/
+ * Domain lines that have no PDF equivalent); this only renders whatever
+ * ordered label/value pairs it's given. Returns undefined for an empty
+ * list, so a caller need not guard for "no lines at all" itself.
  */
-export function buildBackgroundCallout(lines: { label: string; value: string }[]): string | undefined {
+export function buildBackgroundInfoLines(lines: { label: string; value: string }[]): string | undefined {
 	if (!lines.length) return undefined;
-	return ["> [!info]- Background", ...lines.map((l) => `> - **${l.label}:** ${l.value}`)].join("\n");
+	return lines.map((l) => `- **${l.label}:** ${l.value}`).join("\n");
+}
+
+/**
+ * Renders a named trait/feature (an Ancestry trait, a Class feature, a
+ * Complication) as a `ds-feature` "trait" block, same shape ForgeSteel's own
+ * import path uses for these — the difference is only where the description
+ * text comes from: ForgeSteel's export always carries it, while the PDF
+ * path only has it after a DS Compendium lookup finds a matching heading
+ * (see pdf-compendium-resolver.ts's ResolvedNamedFeature), which can come up
+ * empty for a trait the compendium note doesn't have under that exact name —
+ * rendered name-only rather than dropped, so the sheet's own claim that the
+ * hero has this trait is never silently lost.
+ */
+export function buildNamedFeatureBlocks(items: { name: string; description?: string }[], displaySource: string): string {
+	return items
+		.map((item) =>
+			dsBlock("ds-feature", {
+				type: "feature",
+				feature_type: "trait",
+				name: item.name,
+				effects: [...(item.description ? [{ effect: item.description.trim() }] : []), ...sourceEffects(displaySource)],
+			})
+		)
+		.join("\n\n");
 }
 
 /**

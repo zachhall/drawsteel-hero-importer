@@ -19,13 +19,6 @@ speed: 5
 
 *Level 1 Orc Censor*
 
-> [!info]- Background
-> - **Culture:** Mercenary Band (Professional)
-> - **Career:** [[Gladiator]]
-> - **[[Censor Order|Order]]:** Exorcist
-> - **[[DS Compendium/Rules/Features/Censor/1st-Level Features/Deity and Domains|Domain]]:** Fate
-> - **Kit:** [[Mountain]]
-
 ## Characteristics
 
 ~~~ds-characteristics
@@ -46,57 +39,56 @@ collapse_default: false
 max_stamina: 30
 current_stamina: 30
 temp_stamina: 0
-height: 1
+height: 3
 style: default
+~~~
+
+~~~ds-counter
+name: Recoveries
+current_value: 12
+min_value: 0
+max_value: 12
+value_height: 4
+name_height: 1.2
+~~~
+
+~~~ds-values-row
+values:
+  - Max Recoveries: 12
+  - Recovery Value: 10
+value_height: 2
+name_height: 0.8
 ~~~
 
 <hr>
 
 ## Resources
 
-<div class="dshi-resource-row">
-
-~~~ds-counter
-name: Wrath
-current_value: 0
-min_value: 0
+~~~dshi-counter-row
+counters:
+  - name: Wrath
+    current_value: 0
+    min_value: 0
+  - name: Surges
+    current_value: 0
+    min_value: 0
+  - name: Victories
+    current_value: 0
+    min_value: 0
 ~~~
 
-~~~ds-counter
-name: Surges
-current_value: 0
-min_value: 0
+~~~dshi-counter-row
+counters:
+  - name: XP
+    current_value: 0
+    min_value: 0
+  - name: Renown
+    current_value: 0
+    min_value: 0
+  - name: Wealth
+    current_value: 1
+    min_value: 0
 ~~~
-
-~~~ds-counter
-name: Victories
-current_value: 0
-min_value: 0
-~~~
-
-</div>
-
-<div class="dshi-resource-row">
-
-~~~ds-counter
-name: XP
-current_value: 0
-min_value: 0
-~~~
-
-~~~ds-counter
-name: Renown
-current_value: 0
-min_value: 0
-~~~
-
-~~~ds-counter
-name: Wealth
-current_value: 1
-min_value: 0
-~~~
-
-</div>
 
 <hr>
 
@@ -345,6 +337,12 @@ effects:
 <hr>
 
 ## Background Info
+
+- **Culture:** Mercenary Band (Professional)
+- **Career:** Gladiator
+- **Order:** Exorcist
+- **Domain:** Fate
+- **Kit:** Mountain
 
 ### Ancestry
 

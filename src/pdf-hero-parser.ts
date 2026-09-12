@@ -26,6 +26,17 @@ function numberField(raw: RawPdfFields, name: PdfHeroField): number | undefined 
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/** Splits the sheet's "Label:\n- Item\n- Item" list fields (Perks 1/Class Features 1) into just the item names — the leading label line (an ancestry/class name) is discarded as redundant with ancestryName/className. */
+function parseBulletNames(raw: string | undefined): string[] {
+	if (!raw) return [];
+	return raw
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.startsWith("-"))
+		.map((line) => line.replace(/^-\s*/, "").trim())
+		.filter(Boolean);
+}
+
 /**
  * Turns pdf-field-extractor.ts's raw `fieldName -> value` map into a
  * PdfHeroData, using PDF_FIELD_MAP to look up each logical field's real
@@ -52,9 +63,14 @@ export function parsePdfHeroData(raw: RawPdfFields): PdfHeroData {
 		cultureUpbringingName: field(raw, "cultureUpbringingName"),
 		cultureLanguageName: field(raw, "cultureLanguageName"),
 		careerName: field(raw, "careerName"),
+		careerIncitingIncident: field(raw, "careerIncitingIncident"),
+		careerBenefitText: field(raw, "careerBenefitText"),
 		complicationName: field(raw, "complicationName"),
+		complicationDetails: field(raw, "complicationDetails"),
 		className: field(raw, "className"),
+		subclassName: field(raw, "subclassName"),
 		kitName: field(raw, "kitName"),
+		modifierBenefitsText: field(raw, "modifierBenefitsText"),
 		characteristics: {
 			might: numberField(raw, "might"),
 			agility: numberField(raw, "agility"),
@@ -64,6 +80,7 @@ export function parsePdfHeroData(raw: RawPdfFields): PdfHeroData {
 		},
 		currentStamina: numberField(raw, "currentStamina"),
 		maxStamina: numberField(raw, "maxStamina"),
+		maxRecoveries: numberField(raw, "maxRecoveries"),
 		heroicResourceName: field(raw, "heroicResourceName"),
 		heroicResourceValue: numberField(raw, "heroicResourceValue"),
 		surges: numberField(raw, "surges"),
@@ -80,5 +97,7 @@ export function parsePdfHeroData(raw: RawPdfFields): PdfHeroData {
 		abilities: extractAbilities(raw),
 		skills: extractSkills(raw),
 		otherNotes: field(raw, "otherNotes"),
+		ancestryTraitNames: parseBulletNames(field(raw, "perks1")),
+		classFeatureNames: parseBulletNames(field(raw, "classFeatures1")),
 	};
 }
