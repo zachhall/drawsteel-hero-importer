@@ -12,18 +12,24 @@ export const FRONTMATTER_SYNCED_COUNTERS: Record<string, string> = {
 };
 
 /**
- * Pulls every ds-counter block's `current_value` out of a Note's raw source,
- * keyed by its `name` field, so a vault "modify" listener can tell whether a
- * synced property (see FRONTMATTER_SYNCED_COUNTERS) needs to follow a change
- * — e.g. clicking a counter's +/- in Reading view rewrites the codeblock's
- * own YAML, not the frontmatter block, so nothing else keeps them in sync.
+ * Pulls every counter's `current_value` out of a Note's raw source, keyed by
+ * its `name` field, so a vault "modify" listener can tell whether a synced
+ * property (see FRONTMATTER_SYNCED_COUNTERS) needs to follow a change — e.g.
+ * clicking a counter's +/- in Reading view rewrites the codeblock's own YAML,
+ * not the frontmatter block, so nothing else keeps them in sync.
+ *
+ * Scans both standalone `ds-counter` blocks and `dshi-counter-row` blocks
+ * (src/counter-row-view.ts — 2-3 counters grouped into one codeblock, e.g.
+ * Victories now lives inside a row rather than its own block) — a property
+ * named in FRONTMATTER_SYNCED_COUNTERS is synced regardless of which shape
+ * currently holds it.
  */
 export function extractDsCounterValues(content: string): Map<string, number> {
 	const values = new Map<string, number>();
-	const blockPattern = /~~~ds-counter\n([\s\S]*?)\n~~~/g;
 
+	const counterPattern = /~~~ds-counter\n([\s\S]*?)\n~~~/g;
 	let match: RegExpExecArray | null;
-	while ((match = blockPattern.exec(content))) {
+	while ((match = counterPattern.exec(content))) {
 		try {
 			const data = yaml.load(match[1]) as { name?: string; current_value?: number } | undefined;
 			if (data?.name && typeof data.current_value === "number") {
@@ -31,6 +37,20 @@ export function extractDsCounterValues(content: string): Map<string, number> {
 			}
 		} catch {
 			// Malformed YAML in a counter block isn't this function's problem to raise — skip it.
+		}
+	}
+
+	const rowPattern = /~~~dshi-counter-row\n([\s\S]*?)\n~~~/g;
+	while ((match = rowPattern.exec(content))) {
+		try {
+			const data = yaml.load(match[1]) as { counters?: { name?: string; current_value?: number }[] } | undefined;
+			for (const counter of data?.counters ?? []) {
+				if (counter?.name && typeof counter.current_value === "number") {
+					values.set(counter.name, counter.current_value);
+				}
+			}
+		} catch {
+			// Malformed YAML in a counter-row block isn't this function's problem to raise — skip it.
 		}
 	}
 

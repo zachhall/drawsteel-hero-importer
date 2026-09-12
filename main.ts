@@ -1,12 +1,21 @@
 import { Notice, Platform, Plugin, TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
 import { ConfirmModal } from "./src/confirm-modal";
-import { resolveBackgroundLinks } from "./src/compendium-links";
+import { parseCounterRow } from "./src/counter-row-block";
+import { CounterRowView } from "./src/counter-row-view";
 import { DsHero } from "./src/ds-hero-types";
 import { extractDsCounterValues, FRONTMATTER_SYNCED_COUNTERS } from "./src/frontmatter-sync";
 import { flattenHeroFeatures } from "./src/feature-flatten";
 import { computeHeroStats } from "./src/hero-stats";
 import { buildHeroNote } from "./src/markdown-builder";
+import { debugDumpRawFields, extractPdfFields } from "./src/pdf-field-extractor";
+import { DSHI_PDF_DEBUG } from "./src/pdf-field-map";
+import { parsePdfHeroData } from "./src/pdf-hero-parser";
+import { resolvePdfCompendiumLinks } from "./src/pdf-compendium-resolver";
+import { buildPdfHeroNote } from "./src/pdf-note-builder";
 import { DEFAULT_SETTINGS, HeroImporterSettings, HeroImporterSettingTab } from "./src/settings";
+
+/** What pickHeroFile() actually returns: a ready-to-render ForgeSteel hero, or the raw bytes of a picked PDF (parsed later, once computeNotePath needs to exist first for compendium link generation). */
+type PickedHero = { kind: "ds-hero"; hero: DsHero } | { kind: "pdf"; data: ArrayBuffer };
 
 function sanitizeFilename(name: string): string {
 	return name.replace(/[\\/:*?"<>|]/g, "").trim() || "Unnamed Hero";
@@ -50,11 +59,41 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 
 		this.addCommand({
 			id: "import-ds-hero",
-			name: "Import Draw Steel Hero (.ds-hero)",
+			name: "Import Draw Steel Hero (.ds-hero or PDF)",
 			callback: () => this.importAsNote(),
 		});
 
 		this.addSettingTab(new HeroImporterSettingTab(this.app, this));
+
+		// Renders 2-3 counters as one real row (see src/counter-row-view.ts for
+		// why this is a genuine codeblock this plugin owns end-to-end, not a
+		// post-render DOM patch). Explicit negative sortOrder: other plugins
+		// that scan rendered text (e.g. drawsteel-rule-term-linker) register a
+		// plain registerMarkdownPostProcessor at the default sortOrder (0) —
+		// without running before that, this handler's own DOM-population would
+		// lose the race whenever this plugin happens to load after theirs
+		// (Obsidian breaks sortOrder ties by registration/plugin-load order),
+		// leaving the row's counter names still empty when the other
+		// plugin's scan runs, silently breaking whatever depends on that text
+		// already being there. A standalone ds-counter block never had this
+		// problem since draw-steel-elements (which renders it) has always
+		// loaded before any plugin that only post-processes.
+		this.registerMarkdownCodeBlockProcessor(
+			"dshi-counter-row",
+			(source, el, ctx) => {
+				try {
+					const view = new CounterRowView(this.app, parseCounterRow(source), ctx, el);
+					ctx.addChild(view);
+					view.render();
+				} catch (err) {
+					el.createDiv({
+						cls: "error-message",
+						text: `Draw Steel Hero Importer: failed to render dshi-counter-row — ${err instanceof Error ? err.message : String(err)}`,
+					});
+				}
+			},
+			-100
+		);
 
 		// Clicking a ds-counter's +/- rewrites that codeblock's own YAML, not the
 		// Note's frontmatter — this is what keeps a synced property (see
@@ -86,15 +125,21 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 	}
 
 	async importAsNote() {
-		const hero = await this.pickHeroFile();
-		if (!hero) return;
+		const picked = await this.pickHeroFile();
+		if (!picked) return;
 
+		if (picked.kind === "ds-hero") {
+			await this.importDsHero(picked.hero);
+		} else {
+			await this.importPdfHero(picked.data);
+		}
+	}
+
+	private async importDsHero(hero: DsHero) {
 		const heroLevel = hero.class?.level ?? 1;
 		const flat = flattenHeroFeatures(hero, heroLevel);
 		const stats = computeHeroStats(hero, flat.bonuses, flat.kits, flat.characteristicBonuses);
-		const notePath = this.computeNotePath(hero.name);
-		const links = resolveBackgroundLinks(this.app, hero, flat, notePath);
-		const content = buildHeroNote(hero, stats, flat, links);
+		const content = buildHeroNote(hero, stats, flat);
 
 		const target = await this.writeHeroFile(hero.name, content);
 
@@ -103,7 +148,27 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		await leaf.openFile(target);
 	}
 
-	private async pickHeroFile(): Promise<DsHero | undefined> {
+	private async importPdfHero(data: ArrayBuffer) {
+		try {
+			const rawFields = await extractPdfFields(data);
+			if (DSHI_PDF_DEBUG) debugDumpRawFields(rawFields);
+
+			const pdfHero = parsePdfHeroData(rawFields);
+			const compendium = await resolvePdfCompendiumLinks(this.app, pdfHero, this.settings.compendiumFolder);
+			if (!compendium) return; // user cancelled from a match-resolution prompt
+
+			const content = buildPdfHeroNote(pdfHero, compendium);
+			const target = await this.writeHeroFile(pdfHero.name, content);
+
+			new Notice(`Imported ${pdfHero.name} to ${target.path}`);
+			const leaf = this.app.workspace.getLeaf(true);
+			await leaf.openFile(target);
+		} catch (err) {
+			this.reportImportError(err);
+		}
+	}
+
+	private async pickHeroFile(): Promise<PickedHero | undefined> {
 		// Chromium refuses to show an <input type="file"> dialog unless click()
 		// happens inside genuine, still-live user-activation — which Obsidian's
 		// Setting button (and command palette) click handling doesn't reliably
@@ -129,16 +194,17 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 		return this.getNodeRequire()?.("electron") as ElectronLike | undefined;
 	}
 
-	private async pickHeroFileViaElectron(dialog: ElectronDialog): Promise<DsHero | undefined> {
+	private async pickHeroFileViaElectron(dialog: ElectronDialog): Promise<PickedHero | undefined> {
 		if (!Platform.isDesktop) return undefined;
 
 		const result = await dialog.showOpenDialog({
-			title: "Select a .ds-hero file",
+			title: "Select a .ds-hero or PDF file",
 			properties: ["openFile"],
-			filters: [{ name: "Draw Steel Hero", extensions: ["ds-hero"] }],
+			filters: [{ name: "Draw Steel Hero", extensions: ["ds-hero", "pdf"] }],
 		});
 		if (result.canceled || !result.filePaths.length) return undefined;
 
+		const path = result.filePaths[0];
 		try {
 			// "fs/promises" doesn't exist on mobile, so this goes through the
 			// same window.require Node escape hatch as getElectron() above,
@@ -150,20 +216,35 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 			const nodeRequire = this.getNodeRequire();
 			if (!nodeRequire) throw new Error("Node require() is unavailable");
 			const { readFile } = nodeRequire("fs/promises") as typeof import("fs/promises");
-			const text = await readFile(result.filePaths[0], "utf-8");
-			return this.parseHero(text);
+
+			if (path.toLowerCase().endsWith(".pdf")) {
+				const buffer = await readFile(path);
+				const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+				return { kind: "pdf", data };
+			}
+
+			const text = await readFile(path, "utf-8");
+			const hero = this.parseHero(text);
+			return hero ? { kind: "ds-hero", hero } : undefined;
 		} catch (err) {
 			this.reportImportError(err);
 			return undefined;
 		}
 	}
 
-	private pickHeroFileViaHtmlInput(): Promise<DsHero | undefined> {
+	private pickHeroFileViaHtmlInput(): Promise<PickedHero | undefined> {
 		return new Promise((resolve) => {
 			const input = document.body.createEl("input", {
 				type: "file",
 				cls: "dshi-hidden-file-input",
-				attr: { accept: ".ds-hero" },
+				attr: { accept: ".ds-hero,.pdf" },
+			});
+			// "change" never fires on cancel, so without this the input is left
+			// behind in the DOM (invisible but real), and the returned promise
+			// never resolves, every time the user backs out of the picker.
+			input.addEventListener("cancel", () => {
+				input.remove();
+				resolve(undefined);
 			});
 			input.addEventListener("change", () => {
 				const file = input.files?.[0];
@@ -172,9 +253,24 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 					resolve(undefined);
 					return;
 				}
+
+				if (file.name.toLowerCase().endsWith(".pdf")) {
+					file
+						.arrayBuffer()
+						.then((data) => resolve({ kind: "pdf", data }))
+						.catch((err) => {
+							this.reportImportError(err);
+							resolve(undefined);
+						});
+					return;
+				}
+
 				file
 					.text()
-					.then((text) => resolve(this.parseHero(text)))
+					.then((text) => {
+						const hero = this.parseHero(text);
+						resolve(hero ? { kind: "ds-hero", hero } : undefined);
+					})
 					.catch((err) => {
 						this.reportImportError(err);
 						resolve(undefined);
