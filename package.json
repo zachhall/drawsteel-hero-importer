@@ -1,6 +1,6 @@
 {
 	"name": "drawsteel-hero-importer",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"description": "Imports a ForgeSteel .ds-hero export or a filled MCDM character-sheet PDF into a Draw Steel Elements formatted Note.",
 	"main": "main.js",
 	"scripts": {
