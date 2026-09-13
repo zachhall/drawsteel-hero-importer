@@ -1,9 +1,9 @@
 {
 	"id": "drawsteel-hero-importer",
 	"name": "Draw Steel Hero Importer",
-	"version": "1.1.1",
+	"version": "1.2.0",
 	"minAppVersion": "1.6.6",
-	"description": "Imports a ForgeSteel .ds-hero character export into a Draw Steel Elements formatted Note.",
+	"description": "Imports a ForgeSteel .ds-hero export or a filled MCDM character-sheet PDF into a Draw Steel Elements formatted Note.",
 	"author": "hello@zhall.me",
 	"isDesktopOnly": false
 }
