@@ -57,7 +57,7 @@ export class MatchResolutionModal extends Modal {
 			.addButton((button) =>
 				button
 					.setButtonText("Skip — leave unlinked")
-					.setWarning()
+					.setDestructive()
 					.onClick(() => this.finish({ skip: true }))
 			);
 	}

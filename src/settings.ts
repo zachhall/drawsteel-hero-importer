@@ -106,7 +106,7 @@ export class HeroImporterSettingTab extends PluginSettingTab {
 			.addButton((button) =>
 				button
 					.setButtonText("Delete old Notes")
-					.setWarning()
+					.setDestructive()
 					.onClick(() => this.plugin.cleanUpOldHeroNotes())
 			);
 	}
