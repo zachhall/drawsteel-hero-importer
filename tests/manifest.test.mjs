@@ -55,6 +55,12 @@ test("author is a non-empty string", () => {
 	assert.ok(manifest.author.trim().length > 0);
 });
 
+test("author is not an email address", () => {
+	// Obsidian's own plugin review flags an email address in the author field
+	// (contact info belongs in authorUrl, or nowhere in the manifest at all).
+	assert.ok(!/\S+@\S+\.\S+/.test(manifest.author), `author "${manifest.author}" looks like an email address`);
+});
+
 test("description: <= 250 chars, ends with a period, no emoji/special chars", () => {
 	// "Keep plugin descriptions short and simple"
 	const d = manifest.description;
