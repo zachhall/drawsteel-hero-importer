@@ -82,6 +82,13 @@
  * code block in the Note (ds-feature, etc.), so
  * ":has(> .block-language-ds-counter)" scopes it to only the ".el-pre"
  * wrappers that actually contain a counter.
+ *
+ * Obsidian's own plugin review flags :has() as a selector-invalidation
+ * performance risk in general. Accepted here: the selector above is already
+ * scoped as narrowly as the DOM structure allows (a direct-child combinator,
+ * not a broad descendant match), and a DOM-patching alternative (adding a
+ * wrapper class via a MutationObserver) was tried elsewhere in this plugin
+ * and deliberately abandoned as more fragile than this.
  */
 .el-pre:has(> .block-language-ds-counter) {
 	display: inline-flex;

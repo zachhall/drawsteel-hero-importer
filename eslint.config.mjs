@@ -17,6 +17,10 @@ export default defineConfig([
 			// requirement. js-yaml is used deliberately for both parsing (counter
 			// blocks) and dumping (frontmatter/codeblock YAML) -- swapping it for
 			// the suggested alternative isn't worth the behavior risk here.
+			// NOTE: Obsidian's own official plugin review runs its own canonical
+			// eslint-plugin-obsidianmd pass, independent of this override -- this
+			// warning will keep showing up in that review regardless. That's an
+			// accepted, permanent trade-off, not something this override "fixes".
 			"depend/ban-dependencies": "off",
 			// "Draw Steel" / "Forge Steel" are external product names, and
 			// "Hero"/"Note(s)" are this plugin's own domain terms (a "Hero
