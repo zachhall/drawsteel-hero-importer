@@ -8,7 +8,7 @@ codeblocks.
 
 ## Prerequisites
 
-- **Obsidian ≥ 1.6.6**
+- **Obsidian ≥ 1.13.0**
 - **[Draw Steel Elements](https://github.com/SteelCompendium/draw-steel-elements)** — required. The generated Note only renders correctly with this plugin installed and enabled, and only in Reading view (Draw Steel Elements doesn't support Live Preview). Unaffiliated with this plugin.
 - **[ForgeSteel](https://forgesteel.net)** — where `.ds-hero` files come from. Not a dependency to install; unaffiliated with this plugin.
 - A filled official MCDM Draw Steel character-sheet PDF — the other supported input format. Not affiliated with this plugin either. Only tested against MCDM's **Standard** character sheet ([free download](https://www.mcdmproductions.com/draw-steel-resources)); see [FILLABLE PDF BEST PRACTICES.md](FILLABLE%20PDF%20BEST%20PRACTICES.md) before filling one out.
