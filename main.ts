@@ -49,6 +49,27 @@ interface ElectronLike {
 	remote?: { dialog?: ElectronDialog };
 }
 
+/**
+ * The tiny slice of Node's `fs/promises` this plugin actually calls, named
+ * explicitly rather than cast via `typeof import("fs/promises")` — that cast
+ * only type-checks safely when the type-checker can fully resolve
+ * `@types/node`'s real module types, which isn't guaranteed in every
+ * environment this gets linted in. Reading the result as `Uint8Array` (not
+ * `Buffer`) means this has no dependency on `@types/node`'s global `Buffer`
+ * type either — only `.buffer`/`.byteOffset`/`.byteLength` are read below,
+ * all valid on a plain `Uint8Array`.
+ */
+interface FsPromisesReadFile {
+	// A property-typed overload set, not method shorthand -- method shorthand
+	// here trips @typescript-eslint/unbound-method once `readFile` is
+	// destructured off the object below, since a method signature implies its
+	// `this` binding could matter even though this one never uses `this`.
+	readFile: {
+		(path: string): Promise<Uint8Array>;
+		(path: string, encoding: "utf-8"): Promise<string>;
+	};
+}
+
 export default class DrawSteelHeroImporterPlugin extends Plugin {
 	settings!: HeroImporterSettings;
 
@@ -215,11 +236,15 @@ export default class DrawSteelHeroImporterPlugin extends Plugin {
 			// which "fs/promises" isn't from its perspective.
 			const nodeRequire = this.getNodeRequire();
 			if (!nodeRequire) throw new Error("Node require() is unavailable");
-			const { readFile } = nodeRequire("fs/promises") as typeof import("fs/promises");
+			const { readFile } = nodeRequire("fs/promises") as FsPromisesReadFile;
 
 			if (path.toLowerCase().endsWith(".pdf")) {
 				const buffer = await readFile(path);
-				const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+				// Node's fs.readFile always backs its result with a real ArrayBuffer,
+				// never a SharedArrayBuffer -- Uint8Array.buffer's type is the more
+				// general ArrayBufferLike only because the DOM lib's typing has to
+				// account for typed arrays backed by either.
+				const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 				return { kind: "pdf", data };
 			}
 
